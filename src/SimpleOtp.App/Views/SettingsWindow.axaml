@@ -108,8 +108,8 @@
                     </StackPanel>
                 </Border>
 
-                <!-- PIN (Simple mode only) -->
-                <Border Classes="card" IsVisible="{Binding !IsAdvanced}">
+                <!-- PIN (gates the vault key in both modes) -->
+                <Border Classes="card">
                     <StackPanel Spacing="2">
                         <TextBlock Classes="h" Text="PIN"/>
                         <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap"
@@ -127,8 +127,8 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Auto-unlock (Simple mode only) -->
-                <Border Classes="card" IsVisible="{Binding !IsAdvanced}">
+                <!-- Auto-unlock (gates the vault key in both modes) -->
+                <Border Classes="card">
                     <StackPanel Spacing="2">
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBlock Grid.Column="0" Classes="h" Text="Network auto-unlock"/>

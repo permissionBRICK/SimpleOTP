@@ -155,10 +155,11 @@ public sealed class TpmSecretSealer : ISecretSealer
         }
     }
 
-    public SealedBlob ImportHmacKey(ReadOnlySpan<byte> secret, OtpAlgorithm algorithm)
+    public SealedBlob ImportHmacKey(ReadOnlySpan<byte> secret, OtpAlgorithm algorithm, ReadOnlySpan<byte> auth)
     {
         if (secret.IsEmpty) throw new ArgumentException("Secret is empty.", nameof(secret));
         byte[] keyArr = secret.ToArray();
+        byte[] authArr = NormalizeAuth(auth);
         TpmAlgId hashAlg = ToTpmHash(algorithm);
         try
         {
@@ -170,10 +171,11 @@ public sealed class TpmSecretSealer : ISecretSealer
                 // Externally-supplied key bytes (SensitiveDataOrigin clear) created directly under the
                 // SRK as a FixedTPM/FixedParent HMAC key: the seed can never be unsealed or duplicated,
                 // only used for HMAC. This is stronger than the reference design (totpm), which had to
-                // leave FixedTPM clear because it used TPM2_Import.
+                // leave FixedTPM clear because it used TPM2_Import. The object's auth value (the vault
+                // key) gates every HMAC, so a stolen machine still can't mint codes without it.
                 TpmPrivate priv = tpm._AllowErrors().Create(
                     srk,
-                    new SensitiveCreate(Array.Empty<byte>(), keyArr),
+                    new SensitiveCreate(authArr, keyArr),
                     HmacTemplate(hashAlg),
                     Array.Empty<byte>(),
                     Array.Empty<PcrSelection>(),
@@ -203,12 +205,14 @@ public sealed class TpmSecretSealer : ISecretSealer
         finally
         {
             CryptographicOperations.ZeroMemory(keyArr);
+            CryptographicOperations.ZeroMemory(authArr);
         }
     }
 
-    public byte[] ComputeHmac(SealedBlob hmacKey, ReadOnlySpan<byte> data, OtpAlgorithm algorithm)
+    public byte[] ComputeHmac(SealedBlob hmacKey, ReadOnlySpan<byte> data, OtpAlgorithm algorithm, ReadOnlySpan<byte> auth)
     {
         byte[] dataArr = data.ToArray();
+        byte[] authArr = NormalizeAuth(auth);
         TpmAlgId hashAlg = ToTpmHash(algorithm);
         try
         {
@@ -229,8 +233,13 @@ public sealed class TpmSecretSealer : ISecretSealer
                 try
                 {
                     // The counter is 8 bytes, well within one HMAC buffer, so a single TPM2_HMAC suffices
-                    // (no HMAC sequence needed). The MAC is computed inside the TPM; the key never leaves.
-                    return tpm.Hmac(loaded, dataArr, hashAlg);
+                    // (no HMAC sequence needed). The auth value (vault key) is presented for the operation;
+                    // the MAC is computed inside the TPM and the key never leaves.
+                    byte[] mac = tpm[authArr]._AllowErrors().Hmac(loaded, dataArr, hashAlg);
+                    TpmRc rc = tpm._GetLastResponseCode();
+                    if (rc != TpmRc.Success)
+                        throw MapAuthFailure(rc);
+                    return mac;
                 }
                 finally
                 {
@@ -253,6 +262,7 @@ public sealed class TpmSecretSealer : ISecretSealer
         finally
         {
             CryptographicOperations.ZeroMemory(dataArr);
+            CryptographicOperations.ZeroMemory(authArr);
         }
     }
 

@@ -43,7 +43,12 @@ public interface ISecretSealer
     /// </summary>
     /// <param name="secret">The raw shared-secret key bytes.</param>
     /// <param name="algorithm">The HMAC hash the resulting key is permanently bound to.</param>
-    SealedBlob ImportHmacKey(ReadOnlySpan<byte> secret, OtpAlgorithm algorithm);
+    /// <param name="auth">
+    /// The auth value the key is locked under (the vault key). It must be presented again to
+    /// <see cref="ComputeHmac"/>, so possessing the machine is not enough to mint codes — the auth
+    /// (gated by the PIN / network-unlock) is also required. Pass an empty span for no gate.
+    /// </param>
+    SealedBlob ImportHmacKey(ReadOnlySpan<byte> secret, OtpAlgorithm algorithm, ReadOnlySpan<byte> auth);
 
     /// <summary>
     /// Computes <c>HMAC(key, data)</c> using a key previously produced by <see cref="ImportHmacKey"/>,
@@ -52,6 +57,7 @@ public interface ISecretSealer
     /// <param name="hmacKey">A blob from <see cref="ImportHmacKey"/>.</param>
     /// <param name="data">The message to authenticate (the TOTP time counter).</param>
     /// <param name="algorithm">The HMAC hash the key was imported with.</param>
+    /// <param name="auth">The same auth value passed to <see cref="ImportHmacKey"/> (the vault key).</param>
     /// <exception cref="WrongDeviceException">The blob does not belong to this TPM.</exception>
-    byte[] ComputeHmac(SealedBlob hmacKey, ReadOnlySpan<byte> data, OtpAlgorithm algorithm);
+    byte[] ComputeHmac(SealedBlob hmacKey, ReadOnlySpan<byte> data, OtpAlgorithm algorithm, ReadOnlySpan<byte> auth);
 }

@@ -2,6 +2,7 @@ using System.Text;
 using SimpleOtp.Core;
 using SimpleOtp.Core.Crypto;
 using SimpleOtp.Core.Model;
+using SimpleOtp.Core.Storage;
 using SimpleOtp.Core.Totp;
 
 namespace SimpleOtp.Tests;
@@ -45,7 +46,7 @@ public class AdvancedSecurityTests : IDisposable
     {
         using var svc = NewAdvancedVault(new FakeSealer(), masterPassword: null);
         Assert.Equal(SecurityMode.Advanced, svc.Mode);
-        Assert.True(svc.IsUnlocked); // no unlock step in Advanced mode
+        Assert.True(svc.IsUnlocked); // unlocked here: this vault has no PIN, so the vault key auto-opened
 
         var account = Assert.Single(svc.Accounts);
         Assert.Null(account.Secret);            // no plaintext-able ciphertext remains
@@ -54,10 +55,11 @@ public class AdvancedSecurityTests : IDisposable
     }
 
     [Fact]
-    public void Advanced_AddingAccount_NeedsNoUnlockOrPassword()
+    public void Advanced_AddingAccount_NeedsNoMasterPassword()
     {
         using var svc = NewAdvancedVault(new FakeSealer(), masterPassword: "correct horse battery staple");
-        // Adding a second account must not require the master password.
+        // The vault is unlocked (no PIN here), and adding an account must not require the export master
+        // password — the export copy is made with only the public key.
         var added = svc.AddAccount(OtpAuthUri.Parse(SampleUri.Replace("octocat", "hubber")));
         Assert.NotNull(added.HmacKey);
         Assert.NotNull(added.ExportCopy); // export copy is created with only the public key
@@ -104,20 +106,44 @@ public class AdvancedSecurityTests : IDisposable
         using var reopened = new VaultService(device.CloneSameDevice(), _path);
         Assert.Equal(SecurityMode.Advanced, reopened.Mode);
         Assert.True(reopened.IsInitialized);
+        Assert.False(reopened.IsUnlocked);             // locked until the vault key is unsealed
+        reopened.Unlock(ReadOnlySpan<byte>.Empty);     // no PIN on this vault
         Assert.True(reopened.IsUnlocked);
         Assert.Equal(codeAtT59, reopened.GenerateCode(reopened.Accounts[0], DateTime.UnixEpoch.AddSeconds(59)));
     }
 
     [Fact]
-    public void Advanced_OnDifferentDevice_CannotGenerateCodes()
+    public void Advanced_OnDifferentDevice_CannotUnlock()
     {
         using (var svc = NewAdvancedVault(new FakeSealer(), masterPassword: "pw")) { }
 
         using var attacker = new VaultService(new FakeSealer(), _path);
         Assert.Equal(SecurityMode.Advanced, attacker.Mode);
-        // The HMAC key blob belongs to another (fake) device → cannot be loaded.
-        Assert.Throws<WrongDeviceException>(() =>
-            attacker.GenerateCode(attacker.Accounts[0], DateTime.UnixEpoch.AddSeconds(59)));
+        // The vault key won't unseal on another device, so it never unlocks — codes are unreachable
+        // even though the HMAC blobs are right there in the file.
+        Assert.Throws<WrongDeviceException>(() => attacker.Unlock(ReadOnlySpan<byte>.Empty));
+    }
+
+    [Fact]
+    public void Advanced_WithPin_GatesCodeGeneration()
+    {
+        const string pin = "4242";
+        var device = new FakeSealer();
+        string code;
+        using (var svc = NewAdvancedVault(device, masterPassword: "export-pw"))
+        {
+            code = svc.GenerateCode(svc.Accounts[0], DateTime.UnixEpoch.AddSeconds(59));
+            svc.ChangePin(pin); // a PIN on an Advanced vault re-seals the vault key that gates the HMAC keys
+        }
+
+        using var reopened = new VaultService(device.CloneSameDevice(), _path);
+        Assert.Equal(SecurityMode.Advanced, reopened.Mode);
+        Assert.True(reopened.PinProtected);
+        Assert.False(reopened.IsUnlocked);
+        Assert.Throws<WrongPinException>(() => reopened.Unlock("0000"));  // stolen machine without the PIN
+        reopened.Unlock(pin);
+        Assert.True(reopened.IsUnlocked);
+        Assert.Equal(code, reopened.GenerateCode(reopened.Accounts[0], DateTime.UnixEpoch.AddSeconds(59)));
     }
 
     [Fact]
@@ -169,6 +195,40 @@ public class AdvancedSecurityTests : IDisposable
     {
         using var svc = NewAdvancedVault(new FakeSealer(), masterPassword: null);
         Assert.Throws<InvalidOperationException>(() => svc.ConvertToAdvanced(null));
+    }
+
+    [Fact]
+    public void LegacyAdvancedVault_NoVaultKey_StillGeneratesCodes_ButBlocksPin()
+    {
+        // Reproduce a vault written by the pre-gate build: Mode=Advanced, empty Dek, and an HMAC key
+        // created with EMPTY auth. The new code must keep it working (empty-auth operation), not try to
+        // unseal a non-existent vault key and brick it.
+        var device = new FakeSealer();
+        SealedBlob legacyKey = device.ImportHmacKey(
+            Encoding.ASCII.GetBytes("12345678901234567890"), OtpAlgorithm.Sha1, ReadOnlySpan<byte>.Empty);
+        var file = new VaultFile
+        {
+            Backend = device.BackendId,
+            Mode = SecurityMode.Advanced,
+            Dek = new SealedBlob([], []), // legacy: no sealed vault key
+            Accounts =
+            [
+                new Account { Issuer = "GitHub", Label = "octocat", Algorithm = OtpAlgorithm.Sha1, Digits = 6, Period = 30, HmacKey = legacyKey },
+            ],
+        };
+        VaultStore.Save(_path, file);
+
+        using var svc = new VaultService(device.CloneSameDevice(), _path);
+        Assert.Equal(SecurityMode.Advanced, svc.Mode);
+        Assert.True(svc.IsInitialized);
+        Assert.False(svc.PinProtected);
+
+        svc.Unlock(ReadOnlySpan<byte>.Empty); // legacy: no-op, must not throw
+        Assert.True(svc.IsUnlocked);
+        Assert.Equal("287082", svc.GenerateCode(svc.Accounts[0], DateTime.UnixEpoch.AddSeconds(59)));
+
+        // Adding a PIN / auto-unlock to a legacy vault isn't possible without re-import; it's blocked clearly.
+        Assert.Throws<InvalidOperationException>(() => svc.ChangePin("1234"));
     }
 
     [Fact]

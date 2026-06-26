@@ -39,6 +39,9 @@ public partial class AddAccountViewModel : ViewModelBase
 
     public string[] Algorithms { get; } = ["SHA1", "SHA256", "SHA512"];
 
+    /// <summary>Screen-snip capture is wired to the Windows Snipping Tool, so only offered there.</summary>
+    public bool CanSnip { get; } = OperatingSystem.IsWindows();
+
     partial void OnIsBulkChanged(bool value) => AddButtonText = value ? "Add selected" : "Add";
 
     /// <summary>Clears the accumulated bulk-import list and returns to single-account mode.</summary>

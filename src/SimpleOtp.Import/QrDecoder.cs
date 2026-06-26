@@ -84,6 +84,6 @@ public static class QrDecoder
     {
         int w = (int)(src.Width * factor), h = (int)(src.Height * factor);
         if (w < 1 || h < 1) return null;
-        return src.Resize(new SKImageInfo(w, h), SKFilterQuality.High);
+        return src.Resize(new SKImageInfo(w, h), new SKSamplingOptions(SKCubicResampler.Mitchell));
     }
 }

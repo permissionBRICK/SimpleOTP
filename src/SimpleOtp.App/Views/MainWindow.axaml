@@ -10,7 +10,7 @@
         x:DataType="vm:MainWindowViewModel"
         x:Name="Root"
         Width="400" Height="640" MinWidth="360" MinHeight="480"
-        Icon="/Assets/avalonia-logo.ico"
+        Icon="/Assets/simpleotp.ico"
         RequestedThemeVariant="Dark"
         Background="#16171A"
         Title="SimpleOTP">

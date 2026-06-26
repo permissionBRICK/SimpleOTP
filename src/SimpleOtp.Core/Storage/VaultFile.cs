@@ -25,22 +25,23 @@ public sealed class VaultFile
     /// <summary>Which security model protects the secrets (see <see cref="SecurityMode"/>).</summary>
     public SecurityMode Mode { get; set; } = SecurityMode.Simple;
 
-    /// <summary>Whether unlocking requires a non-empty PIN. Simple mode only.</summary>
+    /// <summary>Whether unlocking requires a non-empty PIN. Applies to both modes.</summary>
     public bool PinProtected { get; set; }
 
     /// <summary>
-    /// Simple mode: the TPM-sealed data-encryption key (sealed under the PIN, empty auth when no PIN).
-    /// Empty in Advanced mode, which has no DEK.
+    /// The TPM-sealed vault key, sealed under the PIN (empty auth when no PIN). Both modes use it:
+    /// Simple mode as the AES key that encrypts each secret, Advanced mode as the auth value that gates
+    /// the per-account TPM HMAC keys.
     /// </summary>
     public SealedBlob Dek { get; set; } = new([], []);
 
     /// <summary>
-    /// Optional second sealing of the same DEK under the network auto-unlock secret. Present only
-    /// when auto-unlock is configured (Simple mode only).
+    /// Optional second sealing of the same vault key under the network auto-unlock secret. Present only
+    /// when auto-unlock is configured (either mode).
     /// </summary>
     public SealedBlob? DekAuto { get; set; }
 
-    /// <summary>Network auto-unlock configuration (null/disabled when not used). Simple mode only.</summary>
+    /// <summary>Network auto-unlock configuration (null/disabled when not used). Applies to both modes.</summary>
     public AutoUnlockConfig? AutoUnlock { get; set; }
 
     /// <summary>
@@ -61,8 +62,8 @@ public sealed class VaultFile
     public bool ExportProtected => ExportPublicKey is not null;
 
     /// <summary>
-    /// True once a vault exists on disk. Simple vaults are initialized once their DEK is sealed;
-    /// an Advanced vault is initialized by virtue of its mode (it has no DEK and may have no accounts).
+    /// True once a vault exists on disk. Both modes seal a vault key (DEK), so a sealed DEK means
+    /// initialized; the Mode clause is a belt-and-suspenders guard for a converted/empty-account vault.
     /// </summary>
     public bool IsInitialized => Mode == SecurityMode.Advanced || Dek.Public.Length > 0 || Dek.Private.Length > 0;
 }
