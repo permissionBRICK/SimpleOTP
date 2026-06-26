@@ -1,0 +1,60 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SimpleOtp.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="420" d:DesignHeight="640"
+        x:Class="SimpleOtp.App.Views.ExportWindow"
+        x:DataType="vm:ExportViewModel"
+        Width="420" Height="660"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        RequestedThemeVariant="Dark"
+        Background="#16171A"
+        Title="Export accounts">
+
+    <Window.Styles>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="#3D7DEB"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#4F8BF5"/>
+        </Style>
+    </Window.Styles>
+
+    <DockPanel Margin="18">
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
+            <Button Grid.Column="0" Classes="primary" Content="Save image(s)…" HorizontalAlignment="Left"
+                    Click="OnSave"/>
+            <Button Grid.Column="1" Content="Close" MinWidth="84" HorizontalContentAlignment="Center"
+                    Click="OnClose"/>
+        </Grid>
+
+        <StackPanel Spacing="12">
+            <TextBlock Text="Export accounts" FontSize="20" FontWeight="Bold" Foreground="#F2F3F5"/>
+            <TextBlock Foreground="#9AA0AA" FontSize="12" TextWrapping="Wrap"
+                       Text="Scan this with Google Authenticator (Add → Scan a QR code) or another authenticator to transfer your accounts. The migration format always uses a 30-second period and 6/8-digit codes."/>
+
+            <Border Background="White" CornerRadius="8" Padding="12" HorizontalAlignment="Center">
+                <Image Source="{Binding CurrentImage}" Width="360" Height="360"/>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="14"
+                        IsVisible="{Binding HasMultiple}">
+                <Button Content="◀ Prev" Command="{Binding PrevCommand}" IsEnabled="{Binding CanPrev}"/>
+                <TextBlock Text="{Binding PageLabel}" Foreground="#C9CDD4" VerticalAlignment="Center"/>
+                <Button Content="Next ▶" Command="{Binding NextCommand}" IsEnabled="{Binding CanNext}"/>
+            </StackPanel>
+
+            <TextBlock Text="{Binding PageLabel}" Foreground="#8A8F99" HorizontalAlignment="Center"
+                       IsVisible="{Binding !HasMultiple}"/>
+            <TextBlock Foreground="#6F757F" FontSize="11" TextWrapping="Wrap" HorizontalAlignment="Center"
+                       TextAlignment="Center"
+                       Text="Anyone who scans these QR codes gets your secrets — treat them like the secrets themselves."/>
+        </StackPanel>
+    </DockPanel>
+</Window>

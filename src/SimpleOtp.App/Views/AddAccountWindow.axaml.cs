@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -6,6 +7,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using SimpleOtp.App.ViewModels;
+using SimpleOtp.Core.Totp;
 using SimpleOtp.Import;
 
 namespace SimpleOtp.App.Views;
@@ -24,25 +26,40 @@ public partial class AddAccountWindow : Window
 
     private void OnCancel(object? sender, RoutedEventArgs e) => Close(null);
 
+    // Returns the accounts to add: one in single mode, the ticked subset in bulk mode (null = cancel).
     private void OnAdd(object? sender, RoutedEventArgs e)
     {
-        var data = _vm.Build();
+        if (_vm.IsBulk)
+        {
+            IReadOnlyList<OtpAuthData> selected = _vm.SelectedAccounts();
+            if (selected.Count == 0)
+            {
+                _vm.SetStatus("Select at least one account to import.", error: true);
+                return;
+            }
+            Close(selected);
+            return;
+        }
+
+        OtpAuthData? data = _vm.Build();
         if (data is not null)
-            Close(data);
+            Close(new List<OtpAuthData> { data });
     }
 
     private async void OnOpenImage(object? sender, RoutedEventArgs e)
     {
+        // Allow multiple images so a split (multi-QR) export can be imported in one go.
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Choose a QR code image",
-            AllowMultiple = false,
+            Title = "Choose QR code image(s)",
+            AllowMultiple = true,
             FileTypeFilter = [FilePickerFileTypes.ImageAll],
         });
-        if (files.Count == 0)
-            return;
-        await using var stream = await files[0].OpenReadAsync();
-        await DecodeAndApplyAsync(stream);
+        foreach (IStorageFile file in files)
+        {
+            await using var stream = await file.OpenReadAsync();
+            await DecodeAndApplyAsync(stream);
+        }
     }
 
     private async void OnPasteImage(object? sender, RoutedEventArgs e)
@@ -78,10 +95,13 @@ public partial class AddAccountWindow : Window
         var files = e.DataTransfer?.TryGetFiles();
         if (files is not { Length: > 0 })
             return;
-        if (files[0] is IStorageFile file)
+        foreach (IStorageItem item in files)
         {
-            await using var stream = await file.OpenReadAsync();
-            await DecodeAndApplyAsync(stream);
+            if (item is IStorageFile file)
+            {
+                await using var stream = await file.OpenReadAsync();
+                await DecodeAndApplyAsync(stream);
+            }
         }
     }
 

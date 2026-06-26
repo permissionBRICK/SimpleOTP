@@ -66,8 +66,8 @@
                         <TextBlock Classes="h" Text="PIN"/>
                         <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap"
                                    Text="Optional. When set, the TPM enforces it on unlock. There is no PIN recovery."/>
-                        <TextBox Watermark="New PIN" PasswordChar="•" Text="{Binding NewPin}" Margin="0,8,0,0"/>
-                        <TextBox Watermark="Confirm PIN" PasswordChar="•" Text="{Binding ConfirmPin}" Margin="0,6,0,0"/>
+                        <TextBox PlaceholderText="New PIN" PasswordChar="•" Text="{Binding NewPin}" Margin="0,8,0,0"/>
+                        <TextBox PlaceholderText="Confirm PIN" PasswordChar="•" Text="{Binding ConfirmPin}" Margin="0,6,0,0"/>
                         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
                             <Button Classes="primary" Content="Save PIN" Command="{Binding SavePinCommand}"/>
                             <Button Content="Remove PIN" Command="{Binding RemovePinCommand}"
@@ -93,7 +93,7 @@
                                    Text="The app fetches an unlock key from your webservice (BitLocker-Network-Unlock style) and uses it to open the vault without a PIN. The key is sealed as a second TPM copy; it is never stored on disk here."/>
 
                         <TextBlock Classes="field" Text="Webservice URL (http or https)"/>
-                        <TextBox Text="{Binding Url}" Watermark="https://10.0.0.5:8443/unlock"/>
+                        <TextBox Text="{Binding Url}" PlaceholderText="https://10.0.0.5:8443/unlock"/>
 
                         <TextBlock Classes="field" Text="App key (sent to the service)"/>
                         <Grid ColumnDefinitions="*,Auto">
@@ -122,7 +122,7 @@
                         <Expander Header="HTTPS options" Margin="0,8,0,0">
                             <StackPanel Spacing="2">
                                 <TextBlock Classes="field" Text="Pinned server cert SHA-256 (optional, for self-signed)"/>
-                                <TextBox Text="{Binding PinnedCert}" Watermark="hex thumbprint"
+                                <TextBox Text="{Binding PinnedCert}" PlaceholderText="hex thumbprint"
                                          FontFamily="Cascadia Code,Consolas,monospace"/>
                                 <CheckBox Content="Trust any server certificate (insecure)" IsChecked="{Binding AllowUntrusted}"
                                           Margin="0,6,0,0" Foreground="#C9CDD4"/>
