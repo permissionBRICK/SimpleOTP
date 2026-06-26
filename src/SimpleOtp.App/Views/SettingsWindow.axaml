@@ -1,0 +1,154 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SimpleOtp.App.ViewModels"
+        xmlns:conv="using:SimpleOtp.App.Converters"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="460" d:DesignHeight="760"
+        x:Class="SimpleOtp.App.Views.SettingsWindow"
+        x:DataType="vm:SettingsViewModel"
+        Width="460" Height="760"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        RequestedThemeVariant="Dark"
+        Background="#16171A"
+        Title="Settings">
+
+    <Window.Resources>
+        <conv:BoolToErrorBrushConverter x:Key="ErrorBrush"/>
+    </Window.Resources>
+
+    <Window.Styles>
+        <Style Selector="TextBlock.h">
+            <Setter Property="Foreground" Value="#F2F3F5"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Margin" Value="0,4,0,6"/>
+        </Style>
+        <Style Selector="TextBlock.field">
+            <Setter Property="Foreground" Value="#C9CDD4"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,6,0,2"/>
+        </Style>
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="#1B1D21"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="16"/>
+            <Setter Property="Margin" Value="0,0,0,14"/>
+        </Style>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="#3D7DEB"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#4F8BF5"/>
+        </Style>
+    </Window.Styles>
+
+    <DockPanel Margin="18">
+        <Grid DockPanel.Dock="Bottom" Margin="0,12,0,0" ColumnDefinitions="*,Auto">
+            <TextBlock Grid.Column="0" Text="Sealed to this device's TPM" Foreground="#6F757F"
+                       FontSize="11" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Content="Close" MinWidth="84" HorizontalContentAlignment="Center"
+                    Click="OnClose"/>
+        </Grid>
+
+        <ScrollViewer>
+            <StackPanel Spacing="2">
+                <TextBlock Text="Settings" FontSize="20" FontWeight="Bold" Foreground="#F2F3F5" Margin="0,0,0,8"/>
+
+                <!-- PIN -->
+                <Border Classes="card">
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="h" Text="PIN"/>
+                        <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap"
+                                   Text="Optional. When set, the TPM enforces it on unlock. There is no PIN recovery."/>
+                        <TextBox Watermark="New PIN" PasswordChar="•" Text="{Binding NewPin}" Margin="0,8,0,0"/>
+                        <TextBox Watermark="Confirm PIN" PasswordChar="•" Text="{Binding ConfirmPin}" Margin="0,6,0,0"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                            <Button Classes="primary" Content="Save PIN" Command="{Binding SavePinCommand}"/>
+                            <Button Content="Remove PIN" Command="{Binding RemovePinCommand}"
+                                    IsVisible="{Binding HasPin}"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding PinStatus}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                   IsVisible="{Binding PinStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                   Foreground="{Binding PinError, Converter={StaticResource ErrorBrush}}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Auto-unlock -->
+                <Border Classes="card">
+                    <StackPanel Spacing="2">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Classes="h" Text="Network auto-unlock"/>
+                            <Border Grid.Column="1" IsVisible="{Binding AutoUnlockOn}" Background="#1E3A24"
+                                    CornerRadius="6" Padding="8,2" VerticalAlignment="Center">
+                                <TextBlock Text="ON" Foreground="#7BD88F" FontSize="11" FontWeight="Bold"/>
+                            </Border>
+                        </Grid>
+                        <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap"
+                                   Text="The app fetches an unlock key from your webservice (BitLocker-Network-Unlock style) and uses it to open the vault without a PIN. The key is sealed as a second TPM copy; it is never stored on disk here."/>
+
+                        <TextBlock Classes="field" Text="Webservice URL (http or https)"/>
+                        <TextBox Text="{Binding Url}" Watermark="https://10.0.0.5:8443/unlock"/>
+
+                        <TextBlock Classes="field" Text="App key (sent to the service)"/>
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Grid.Column="0" Text="{Binding AppKey}" FontFamily="Cascadia Code,Consolas,monospace"/>
+                            <Button Grid.Column="1" Content="Generate" Margin="8,0,0,0" Command="{Binding GenerateAppKeyCommand}"/>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="*,*" Margin="0,2,0,0">
+                            <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                <TextBlock Classes="field" Text="App-key header"/>
+                                <TextBox Text="{Binding AppKeyHeader}"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                <TextBlock Classes="field" Text="Method"/>
+                                <ComboBox ItemsSource="{Binding Methods}" SelectedIndex="{Binding MethodIndex}"
+                                          HorizontalAlignment="Stretch"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock Classes="field" Text="Auto-unlock key (the body your service must return)"/>
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Grid.Column="0" Text="{Binding AutoUnlockKey}" FontFamily="Cascadia Code,Consolas,monospace"/>
+                            <Button Grid.Column="1" Content="Generate" Margin="8,0,0,0" Command="{Binding GenerateAutoKeyCommand}"/>
+                        </Grid>
+
+                        <Expander Header="HTTPS options" Margin="0,8,0,0">
+                            <StackPanel Spacing="2">
+                                <TextBlock Classes="field" Text="Pinned server cert SHA-256 (optional, for self-signed)"/>
+                                <TextBox Text="{Binding PinnedCert}" Watermark="hex thumbprint"
+                                         FontFamily="Cascadia Code,Consolas,monospace"/>
+                                <CheckBox Content="Trust any server certificate (insecure)" IsChecked="{Binding AllowUntrusted}"
+                                          Margin="0,6,0,0" Foreground="#C9CDD4"/>
+                            </StackPanel>
+                        </Expander>
+
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+                            <Button Classes="primary" Content="Enable" Command="{Binding EnableAutoUnlockCommand}"/>
+                            <Button Content="Test" Command="{Binding TestConnectionCommand}"/>
+                            <Button Content="Disable" Command="{Binding DisableAutoUnlockCommand}"
+                                    IsVisible="{Binding AutoUnlockOn}"/>
+                        </StackPanel>
+
+                        <TextBlock Text="{Binding AutoStatus}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                   IsVisible="{Binding AutoStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                   Foreground="{Binding AutoError, Converter={StaticResource ErrorBrush}}"/>
+
+                        <Border IsVisible="{Binding ShowContract}" Background="#101216" CornerRadius="6"
+                                Padding="10" Margin="0,8,0,0">
+                            <TextBox Text="{Binding Contract}" IsReadOnly="True" AcceptsReturn="True"
+                                     TextWrapping="Wrap" BorderThickness="0" Background="Transparent"
+                                     FontFamily="Cascadia Code,Consolas,monospace" FontSize="12"/>
+                        </Border>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
