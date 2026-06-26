@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using SimpleOtp.Core.Crypto;
+using SimpleOtp.Core.Model;
 
 namespace SimpleOtp.Tests;
 
@@ -58,5 +59,38 @@ public sealed class FakeSealer : ISecretSealer
         if (!CryptographicOperations.FixedTimeEquals(authHash, SHA256.HashData(auth)))
             throw new WrongPinException("Wrong PIN (fake).");
         return data;
+    }
+
+    // Models the TPM HMAC key as a device-bound blob holding the key bytes (never returned to the
+    // caller) plus the bound hash algorithm. ComputeHmac decrypts it internally and HMACs in software,
+    // so the API contract — "only the MAC comes out" — matches the real backend; codes are identical.
+    public SealedBlob ImportHmacKey(ReadOnlySpan<byte> secret, OtpAlgorithm algorithm)
+    {
+        byte[] tagged = [(byte)algorithm, .. secret];
+        SealedBlob blob = Seal(tagged, ReadOnlySpan<byte>.Empty);
+        CryptographicOperations.ZeroMemory(tagged);
+        return blob;
+    }
+
+    public byte[] ComputeHmac(SealedBlob hmacKey, ReadOnlySpan<byte> data, OtpAlgorithm algorithm)
+    {
+        byte[] tagged = Unseal(hmacKey, ReadOnlySpan<byte>.Empty);
+        try
+        {
+            if (tagged.Length == 0 || (OtpAlgorithm)tagged[0] != algorithm)
+                throw new SealerException("HMAC key algorithm mismatch (fake).");
+            byte[] key = tagged[1..];
+            using HMAC hmac = algorithm switch
+            {
+                OtpAlgorithm.Sha256 => new HMACSHA256(key),
+                OtpAlgorithm.Sha512 => new HMACSHA512(key),
+                _ => new HMACSHA1(key),
+            };
+            return hmac.ComputeHash(data.ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(tagged);
+        }
     }
 }

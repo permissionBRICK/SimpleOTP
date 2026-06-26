@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SimpleOtp.Core;
 using SimpleOtp.Core.Crypto;
+using SimpleOtp.Core.Model;
 
 namespace SimpleOtp.App.ViewModels;
 
@@ -28,6 +29,13 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _isNoTpm;
     [ObservableProperty] private bool _isError;
     [ObservableProperty] private bool _isConnecting;
+    [ObservableProperty] private bool _isLoading;
+
+    /// <summary>Advanced Security mode: codes come straight from the TPM, so there is no lock step.</summary>
+    [ObservableProperty] private bool _isAdvancedMode;
+
+    /// <summary>Whether the lock button applies (Simple mode, ready). Advanced mode has nothing to lock.</summary>
+    [ObservableProperty] private bool _canLock;
 
     /// <summary>True when network auto-unlock is configured (controls the "retry" button on the lock screen).</summary>
     [ObservableProperty] private bool _autoUnlockAvailable;
@@ -63,29 +71,40 @@ public partial class MainWindowViewModel : ViewModelBase
     public async Task BootstrapAsync()
     {
         if (_sealer is null) return;
+        // Show the loading spinner immediately, then do the (slow, first-call) TPM/vault work off the UI
+        // thread so the window paints right away instead of sitting blank while the TPM warms up.
+        SetState(loading: true);
         try
         {
-            if (!_sealer.IsAvailable)
+            bool available = await Task.Run(() => _sealer.IsAvailable);
+            if (!available)
             {
                 SetState(noTpm: true);
                 return;
             }
 
-            Service = new VaultService(_sealer);
-            StorePath = Service.StorePath;
-            AutoUnlockAvailable = Service.AutoUnlockEnabled;
+            VaultService service = await Task.Run(() => new VaultService(_sealer));
+            Service = service;
+            StorePath = service.StorePath;
+            AutoUnlockAvailable = service.AutoUnlockEnabled;
+            IsAdvancedMode = service.Mode == SecurityMode.Advanced;
 
-            if (!Service.IsInitialized)
+            if (IsAdvancedMode)
             {
-                Service.CreateNew(ReadOnlySpan<byte>.Empty); // first run: no PIN by default
+                await Task.Run(service.ValidateDevice); // wrong TPM → WrongDeviceException
                 EnterReady();
             }
-            else if (!Service.PinProtected)
+            else if (!service.IsInitialized)
             {
-                Service.Unlock(ReadOnlySpan<byte>.Empty);
+                await Task.Run(() => service.CreateNew(ReadOnlySpan<byte>.Empty)); // first run: no PIN by default
                 EnterReady();
             }
-            else if (Service.AutoUnlockEnabled && await TryAutoUnlockAsync())
+            else if (!service.PinProtected)
+            {
+                await Task.Run(() => service.Unlock(ReadOnlySpan<byte>.Empty));
+                EnterReady();
+            }
+            else if (service.AutoUnlockEnabled && await TryAutoUnlockAsync())
             {
                 EnterReady();
             }
@@ -158,7 +177,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private void Lock()
     {
-        if (Service is null || !IsReady) return;
+        if (Service is null || !IsReady || IsAdvancedMode) return;
         _timer.Stop();
         Tokens.Clear();
         HasAccounts = false;
@@ -191,8 +210,11 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public void NotifySettingsChanged()
     {
+        IsAdvancedMode = Service?.Mode == SecurityMode.Advanced;
         PinSet = Service?.PinProtected ?? false;
         AutoUnlockAvailable = Service?.AutoUnlockEnabled ?? false;
+        CanLock = IsReady && !IsAdvancedMode;
+        ReloadTokens(); // a mode switch rewrote how each secret is stored; rebuild the cards
     }
 
     public async Task ShowToastAsync(string message)
@@ -220,13 +242,15 @@ public partial class MainWindowViewModel : ViewModelBase
             token.Refresh(now);
     }
 
-    private void SetState(bool ready = false, bool locked = false, bool noTpm = false, bool error = false, bool connecting = false)
+    private void SetState(bool ready = false, bool locked = false, bool noTpm = false, bool error = false, bool connecting = false, bool loading = false)
     {
         IsReady = ready;
         IsLocked = locked;
         IsNoTpm = noTpm;
         IsError = error;
         IsConnecting = connecting;
+        IsLoading = loading;
+        CanLock = ready && !IsAdvancedMode;
     }
 
     private void SetError(string message)

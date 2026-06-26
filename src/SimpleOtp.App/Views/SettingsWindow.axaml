@@ -60,8 +60,56 @@
             <StackPanel Spacing="2">
                 <TextBlock Text="Settings" FontSize="20" FontWeight="Bold" Foreground="#F2F3F5" Margin="0,0,0,8"/>
 
-                <!-- PIN -->
+                <!-- Security mode -->
                 <Border Classes="card">
+                    <StackPanel Spacing="2">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Classes="h" Text="Security mode"/>
+                            <Border Grid.Column="1" Background="#243042" CornerRadius="6" Padding="8,2" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding ModeBadge}" Foreground="#6AA9FF" FontSize="11" FontWeight="Bold"/>
+                            </Border>
+                        </Grid>
+
+                        <!-- Simple → Advanced -->
+                        <StackPanel Spacing="2" IsVisible="{Binding !IsAdvanced}">
+                            <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap"
+                                       Text="Simple Security keeps each secret as device-bound ciphertext; it is briefly decrypted in memory to make a code, and can be exported freely."/>
+                            <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Text="Advanced Security imports each secret into the TPM as a non-exportable key and computes the code inside the chip — the seed never leaves the device. Set a master password to keep an encrypted, recoverable copy so you can still export later; leave it blank to make the secrets permanently non-exportable."/>
+                            <TextBlock Classes="field" Text="Master password (optional)"/>
+                            <TextBox PasswordChar="•" Text="{Binding MasterPassword}" PlaceholderText="Long passphrase, or leave blank"/>
+                            <TextBox PasswordChar="•" Text="{Binding ConfirmMasterPassword}" PlaceholderText="Confirm master password" Margin="0,6,0,0"/>
+                            <Button Classes="primary" Content="Switch to Advanced Security" Margin="0,10,0,0"
+                                    Click="OnSwitchToAdvanced"/>
+                        </StackPanel>
+
+                        <!-- Advanced → Simple -->
+                        <StackPanel Spacing="2" IsVisible="{Binding IsAdvanced}">
+                            <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap"
+                                       Text="Codes are computed inside the TPM; the seeds cannot be read off this device. Adding accounts and generating codes never need the master password."/>
+                            <StackPanel IsVisible="{Binding ExportProtected}" Spacing="2">
+                                <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Text="A master password is set, so you can export or switch back to Simple by entering it."/>
+                                <TextBlock Classes="field" Text="Master password"/>
+                                <TextBox PasswordChar="•" Text="{Binding MasterPassword}" PlaceholderText="Master password"/>
+                                <Button Content="Switch back to Simple Security" Margin="0,10,0,0"
+                                        Click="OnSwitchToSimple"/>
+                            </StackPanel>
+                            <Border IsVisible="{Binding !ExportProtected}" Background="#3A2A1E" CornerRadius="6"
+                                    Padding="10" Margin="0,8,0,0">
+                                <TextBlock Foreground="#E0A96D" FontSize="12" TextWrapping="Wrap"
+                                           Text="No master password was set, so these secrets cannot be exported and the vault cannot be converted back to Simple. Keep your original QR codes."/>
+                            </Border>
+                        </StackPanel>
+
+                        <TextBlock Text="{Binding ModeStatus}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                   IsVisible="{Binding ModeStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                   Foreground="{Binding ModeError, Converter={StaticResource ErrorBrush}}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- PIN (Simple mode only) -->
+                <Border Classes="card" IsVisible="{Binding !IsAdvanced}">
                     <StackPanel Spacing="2">
                         <TextBlock Classes="h" Text="PIN"/>
                         <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap"
@@ -79,8 +127,8 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Auto-unlock -->
-                <Border Classes="card">
+                <!-- Auto-unlock (Simple mode only) -->
+                <Border Classes="card" IsVisible="{Binding !IsAdvanced}">
                     <StackPanel Spacing="2">
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBlock Grid.Column="0" Classes="h" Text="Network auto-unlock"/>

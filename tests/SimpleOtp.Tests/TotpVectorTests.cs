@@ -41,6 +41,32 @@ public class TotpVectorTests
         Assert.Equal(1, TotpGenerator.RemainingSeconds(30, nearEnd));
     }
 
+    [Theory]
+    [InlineData(59L, "94287082", "46119246", "90693936")]
+    [InlineData(1111111109L, "07081804", "68084774", "25091201")]
+    [InlineData(2000000000L, "69279037", "90698825", "38618901")]
+    public void Truncate_FromRawHmac_MatchesRfc6238Vectors(long unixTime, string sha1, string sha256, string sha512)
+    {
+        // Mirrors the Advanced-mode path: build the time counter, HMAC it (here in software; on the
+        // real TPM the chip does this), then RFC 4226 dynamic-truncate. Must equal the OtpNet codes.
+        DateTime utc = DateTime.UnixEpoch.AddSeconds(unixTime);
+        Assert.Equal(sha1, TruncateVia(Sha1Seed, OtpAlgorithm.Sha1, utc));
+        Assert.Equal(sha256, TruncateVia(Sha256Seed, OtpAlgorithm.Sha256, utc));
+        Assert.Equal(sha512, TruncateVia(Sha512Seed, OtpAlgorithm.Sha512, utc));
+    }
+
+    private static string TruncateVia(byte[] seed, OtpAlgorithm algorithm, DateTime utc)
+    {
+        byte[] counter = TotpGenerator.CounterBytes(30, utc);
+        using System.Security.Cryptography.HMAC hmac = algorithm switch
+        {
+            OtpAlgorithm.Sha256 => new System.Security.Cryptography.HMACSHA256(seed),
+            OtpAlgorithm.Sha512 => new System.Security.Cryptography.HMACSHA512(seed),
+            _ => new System.Security.Cryptography.HMACSHA1(seed),
+        };
+        return TotpGenerator.Truncate(hmac.ComputeHash(counter), 8);
+    }
+
     [Fact]
     public void DefaultSixDigitCode_HasSixDigits()
     {

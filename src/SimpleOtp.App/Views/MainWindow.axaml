@@ -73,6 +73,19 @@
         <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#4F8BF5"/>
         </Style>
+
+        <!-- Spinning loading ring -->
+        <Style Selector="shapes|Arc.spinner">
+            <Setter Property="RenderTransform">
+                <RotateTransform/>
+            </Setter>
+            <Style.Animations>
+                <Animation Duration="0:0:0.9" IterationCount="Infinite">
+                    <KeyFrame Cue="0%"><Setter Property="RotateTransform.Angle" Value="0"/></KeyFrame>
+                    <KeyFrame Cue="100%"><Setter Property="RotateTransform.Angle" Value="360"/></KeyFrame>
+                </Animation>
+            </Style.Animations>
+        </Style>
     </Window.Styles>
 
     <Grid>
@@ -80,16 +93,21 @@
         <DockPanel>
             <!-- Header -->
             <Border DockPanel.Dock="Top" Padding="16,12" Background="#1B1D21">
-                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto">
                     <TextBlock Grid.Column="0" Text="SimpleOTP" FontSize="18" FontWeight="Bold"
                                Foreground="#F2F3F5" VerticalAlignment="Center"/>
-                    <Button Grid.Column="2" Classes="icon" Content="📤" ToolTip.Tip="Export accounts"
+                    <Border Grid.Column="1" IsVisible="{Binding IsAdvancedMode}" Background="#243042"
+                            CornerRadius="6" Padding="7,2" Margin="8,0,0,0" VerticalAlignment="Center"
+                            ToolTip.Tip="Secrets are non-exportable and HMAC is computed inside the TPM">
+                        <TextBlock Text="ADVANCED" Foreground="#6AA9FF" FontSize="10" FontWeight="Bold"/>
+                    </Border>
+                    <Button Grid.Column="3" Classes="icon" Content="📤" ToolTip.Tip="Export accounts"
                             IsVisible="{Binding HasAccounts}" Click="OnExportClick"/>
-                    <Button Grid.Column="3" Classes="icon" Content="🔒" ToolTip.Tip="Lock"
-                            IsVisible="{Binding IsReady}" Click="OnLockClick"/>
-                    <Button Grid.Column="4" Classes="icon" Content="⚙" ToolTip.Tip="Settings"
+                    <Button Grid.Column="4" Classes="icon" Content="🔒" ToolTip.Tip="Lock"
+                            IsVisible="{Binding CanLock}" Click="OnLockClick"/>
+                    <Button Grid.Column="5" Classes="icon" Content="⚙" ToolTip.Tip="Settings"
                             IsVisible="{Binding IsReady}" Click="OnSettingsClick"/>
-                    <Button Grid.Column="5" Classes="icon" Content="+" FontSize="24" FontWeight="Bold"
+                    <Button Grid.Column="6" Classes="icon" Content="+" FontSize="24" FontWeight="Bold"
                             ToolTip.Tip="Add account" IsVisible="{Binding IsReady}" Click="OnAddClick"/>
                 </Grid>
             </Border>
@@ -164,6 +182,18 @@
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
                     <Button Content="Retry auto-unlock" Command="{Binding RetryAutoUnlockCommand}"
                             IsVisible="{Binding AutoUnlockAvailable}" HorizontalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- LOADING: TPM/vault warming up at startup -->
+                <StackPanel IsVisible="{Binding IsLoading}" VerticalAlignment="Center"
+                            HorizontalAlignment="Center" Spacing="16" Margin="32">
+                    <Grid Width="46" Height="46" HorizontalAlignment="Center">
+                        <Ellipse Width="40" Height="40" Stroke="#2A2C31" StrokeThickness="4"/>
+                        <shapes:Arc Classes="spinner" Width="40" Height="40" StrokeThickness="4"
+                                    Stroke="#6AA9FF" StartAngle="0" SweepAngle="90"
+                                    RenderTransformOrigin="50%,50%"/>
+                    </Grid>
+                    <TextBlock Text="Starting…" FontSize="15" Foreground="#8A8F99" HorizontalAlignment="Center"/>
                 </StackPanel>
 
                 <!-- CONNECTING: trying network auto-unlock -->

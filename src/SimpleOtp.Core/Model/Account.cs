@@ -1,8 +1,14 @@
+using SimpleOtp.Core.Crypto;
+
 namespace SimpleOtp.Core.Model;
 
 /// <summary>
 /// One TOTP account. All metadata is stored in cleartext so the list can render without unlocking;
-/// only <see cref="Secret"/> (the shared seed) is encrypted.
+/// only the shared seed is protected. How it is protected depends on the vault's
+/// <see cref="SecurityMode"/>:
+///   * Simple — <see cref="Secret"/> holds AES-GCM ciphertext under the vault DEK.
+///   * Advanced — <see cref="HmacKey"/> holds the non-exportable TPM HMAC key; <see cref="ExportCopy"/>
+///     holds an optional recoverable copy (present only when a master password is set).
 /// </summary>
 public sealed class Account
 {
@@ -22,8 +28,17 @@ public sealed class Account
     /// <summary>Time step in seconds (commonly 30).</summary>
     public int Period { get; set; } = 30;
 
-    /// <summary>The AES-GCM encrypted shared secret.</summary>
-    public EncryptedSecret Secret { get; set; } = new([], [], []);
+    /// <summary>Simple mode: the AES-GCM encrypted shared secret (under the vault DEK). Null in Advanced mode.</summary>
+    public EncryptedSecret? Secret { get; set; }
+
+    /// <summary>Advanced mode: the non-exportable TPM HMAC key for this account. Null in Simple mode.</summary>
+    public SealedBlob? HmacKey { get; set; }
+
+    /// <summary>
+    /// Advanced mode + master password: a recoverable copy of the secret, encrypted to the vault's
+    /// export public key. Null when no master password is set (then the secret cannot be exported).
+    /// </summary>
+    public ExportCopy? ExportCopy { get; set; }
 
     /// <summary>A friendly one-line title for display.</summary>
     public string DisplayName =>

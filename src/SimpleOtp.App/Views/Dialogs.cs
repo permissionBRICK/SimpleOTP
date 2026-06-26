@@ -32,6 +32,37 @@ public static class Dialogs
         return tcs.Task;
     }
 
+    /// <summary>Prompts for a single line of (optionally masked) text. Returns null if cancelled.</summary>
+    public static Task<string?> PromptAsync(Window owner, string title, string message, string okText,
+        string placeholder = "", bool isPassword = false)
+    {
+        var tcs = new TaskCompletionSource<string?>();
+
+        var input = new TextBox { PlaceholderText = placeholder, Margin = new Thickness(0, 4, 0, 0) };
+        if (isPassword) input.PasswordChar = '•';
+
+        var cancel = new Button { Content = "Cancel", MinWidth = 88, HorizontalContentAlignment = HorizontalAlignment.Center };
+        var ok = new Button
+        {
+            Content = okText,
+            MinWidth = 88,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Background = new SolidColorBrush(Color.Parse("#3D7DEB")),
+            Foreground = Brushes.White,
+        };
+
+        var window = BuildWindow(title, message, [cancel, ok], input);
+        void Submit() { tcs.TrySetResult(input.Text ?? ""); window.Close(); }
+        cancel.Click += (_, _) => { tcs.TrySetResult(null); window.Close(); };
+        ok.Click += (_, _) => Submit();
+        input.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) Submit(); };
+        window.Closed += (_, _) => tcs.TrySetResult(null);
+        window.Opened += (_, _) => input.Focus();
+
+        window.ShowDialog(owner);
+        return tcs.Task;
+    }
+
     public static Task AlertAsync(Window owner, string title, string message)
     {
         var tcs = new TaskCompletionSource();
@@ -43,7 +74,7 @@ public static class Dialogs
         return tcs.Task;
     }
 
-    private static Window BuildWindow(string title, string message, Button[] buttons)
+    private static Window BuildWindow(string title, string message, Button[] buttons, Control? extra = null)
     {
         var buttonRow = new StackPanel
         {
@@ -62,9 +93,10 @@ public static class Dialogs
             {
                 new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White },
                 new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.Parse("#C9CDD4")) },
-                buttonRow,
             },
         };
+        if (extra is not null) content.Children.Add(extra);
+        content.Children.Add(buttonRow);
 
         return new Window
         {

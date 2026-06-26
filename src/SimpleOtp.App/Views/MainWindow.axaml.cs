@@ -76,10 +76,34 @@ public partial class MainWindow : Window
     {
         if (Vm?.Service is null)
             return;
+
+        // Advanced mode: secrets live non-exportably in the TPM. Exporting needs the master password
+        // (and is impossible at all if none was set).
+        string? masterPassword = null;
+        if (Vm.Service.Mode == SimpleOtp.Core.Model.SecurityMode.Advanced)
+        {
+            if (!Vm.Service.ExportProtected)
+            {
+                await Dialogs.AlertAsync(this, "Export disabled",
+                    "This vault uses Advanced Security without a master password, so the secrets cannot be " +
+                    "read off this device. Use your original QR codes to set up another device.");
+                return;
+            }
+            masterPassword = await Dialogs.PromptAsync(this, "Export accounts",
+                "Enter your master password to recover the secrets for export.", "Export",
+                placeholder: "Master password", isPassword: true);
+            if (masterPassword is null) return; // cancelled
+        }
+
         IReadOnlyList<string> uris;
         try
         {
-            uris = Vm.Service.ExportToMigrationUris();
+            uris = Vm.Service.ExportToMigrationUris(masterPassword);
+        }
+        catch (SimpleOtp.Core.Crypto.WrongPinException)
+        {
+            await Dialogs.AlertAsync(this, "Couldn't export", "Wrong master password.");
+            return;
         }
         catch (Exception ex)
         {

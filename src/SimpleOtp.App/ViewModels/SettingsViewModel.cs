@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SimpleOtp.Core;
 using SimpleOtp.Core.AutoUnlock;
+using SimpleOtp.Core.Crypto;
 using SimpleOtp.Core.Model;
 
 namespace SimpleOtp.App.ViewModels;
@@ -14,6 +15,14 @@ namespace SimpleOtp.App.ViewModels;
 public partial class SettingsViewModel : ViewModelBase
 {
     private readonly VaultService? _service;
+
+    // Security mode
+    [ObservableProperty] private bool _isAdvanced;
+    [ObservableProperty] private bool _exportProtected;
+    [ObservableProperty] private string _masterPassword = "";
+    [ObservableProperty] private string _confirmMasterPassword = "";
+    [ObservableProperty] private string _modeStatus = "";
+    [ObservableProperty] private bool _modeError;
 
     // PIN
     [ObservableProperty] private bool _hasPin;
@@ -36,6 +45,10 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _contract = "";
     [ObservableProperty] private bool _showContract;
 
+    /// <summary>Short badge for the current mode.</summary>
+    public string ModeBadge => IsAdvanced ? "ADVANCED" : "SIMPLE";
+    partial void OnIsAdvancedChanged(bool value) => OnPropertyChanged(nameof(ModeBadge));
+
     public string[] Methods { get; } = ["POST", "GET"];
 
     /// <summary>True if anything was changed (so the caller can refresh the main view).</summary>
@@ -48,6 +61,8 @@ public partial class SettingsViewModel : ViewModelBase
         _service = service;
         if (service is not null)
         {
+            IsAdvanced = service.Mode == SecurityMode.Advanced;
+            ExportProtected = service.ExportProtected;
             HasPin = service.PinProtected;
             AutoUnlockOn = service.AutoUnlockEnabled;
             AutoUnlockConfig? cfg = service.AutoUnlock;
@@ -67,6 +82,57 @@ public partial class SettingsViewModel : ViewModelBase
 
     [RelayCommand] private void GenerateAppKey() => AppKey = NewToken();
     [RelayCommand] private void GenerateAutoKey() => AutoUnlockKey = NewToken();
+
+    /// <summary>
+    /// Converts the vault to Advanced Security. The master password is optional; with none, exporting
+    /// becomes permanently impossible (the caller is expected to have confirmed this). Returns true on
+    /// success. Validation/TPM errors are surfaced via <see cref="ModeStatus"/>.
+    /// </summary>
+    public bool TryConvertToAdvanced()
+    {
+        if (_service is null) return false;
+        string pw = MasterPassword;
+        if (pw.Length > 0 && pw != ConfirmMasterPassword) { SetMode("The master passwords don't match.", true); return false; }
+        try
+        {
+            _service.ConvertToAdvanced(pw.Length == 0 ? null : pw);
+            IsAdvanced = true;
+            ExportProtected = _service.ExportProtected;
+            HasPin = false; // Advanced mode drops the Simple-mode PIN
+            AutoUnlockOn = false;
+            MasterPassword = ConfirmMasterPassword = "";
+            Changed = true;
+            SetMode(ExportProtected
+                ? "Advanced Security is on. Codes are now computed inside the TPM. Keep your master password safe — it is the only way to export."
+                : "Advanced Security is on (no master password). Codes work, but these secrets can never be exported from this device.", false);
+            return true;
+        }
+        catch (Exception ex) { SetMode(ex.Message, true); return false; }
+    }
+
+    /// <summary>
+    /// Converts the vault back to Simple Security using the master password. Returns true on success;
+    /// a wrong/absent password is surfaced via <see cref="ModeStatus"/>.
+    /// </summary>
+    public bool TryConvertToSimple()
+    {
+        if (_service is null) return false;
+        try
+        {
+            _service.ConvertToSimple(MasterPassword);
+            IsAdvanced = false;
+            ExportProtected = false;
+            HasPin = false;
+            MasterPassword = ConfirmMasterPassword = "";
+            Changed = true;
+            SetMode("Switched back to Simple Security.", false);
+            return true;
+        }
+        catch (WrongPinException) { SetMode("Wrong master password.", true); return false; }
+        catch (Exception ex) { SetMode(ex.Message, true); return false; }
+    }
+
+    private void SetMode(string message, bool error) { ModeStatus = message; ModeError = error; }
 
     [RelayCommand]
     private void SavePin()
