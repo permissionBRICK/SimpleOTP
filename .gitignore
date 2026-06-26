@@ -1,0 +1,13 @@
+## .NET build output
+bin/
+obj/
+*.user
+artifacts/
+
+## Rider / VS
+.idea/
+.vs/
+
+## App data (never commit a vault — it contains the TPM-sealed key material)
+vault.json
+*.vault.json

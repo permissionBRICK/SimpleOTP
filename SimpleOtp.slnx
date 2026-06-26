@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SimpleOtp.App/SimpleOtp.App.csproj" />
+    <Project Path="src/SimpleOtp.Core/SimpleOtp.Core.csproj" />
+    <Project Path="src/SimpleOtp.Import/SimpleOtp.Import.csproj" />
+    <Project Path="src/SimpleOtp.Tpm/SimpleOtp.Tpm.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SimpleOtp.Tests/SimpleOtp.Tests.csproj" />
+  </Folder>
+</Solution>
