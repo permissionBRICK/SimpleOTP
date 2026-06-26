@@ -124,4 +124,25 @@ public class VaultServiceTests : IDisposable
         Assert.Single(reopened.Accounts);
         Assert.DoesNotContain(reopened.Accounts, a => a.Id == id);
     }
+
+    [Fact]
+    public void ExportToMigrationUris_RoundTripsAccounts()
+    {
+        using var svc = new VaultService(new FakeSealer(), _path);
+        svc.CreateNew(ReadOnlySpan<byte>.Empty);
+        svc.AddAccount(OtpAuthUri.Parse(SampleUri));
+        svc.AddAccount(OtpAuthUri.Parse(SampleUri.Replace("octocat", "hubber")));
+
+        var uris = svc.ExportToMigrationUris();
+        Assert.NotEmpty(uris);
+
+        var exported = uris.SelectMany(OtpAuthMigration.Parse).ToList();
+        Assert.Equal(2, exported.Count);
+        Assert.Contains(exported, a => a.Label == "octocat");
+        Assert.Contains(exported, a => a.Label == "hubber");
+        // Secret survives decrypt -> export -> parse (RFC seed bytes).
+        Assert.Equal(
+            System.Text.Encoding.ASCII.GetBytes("12345678901234567890"),
+            exported.First(a => a.Label == "octocat").SecretBytes);
+    }
 }

@@ -133,6 +133,31 @@ public sealed class VaultService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Exports all accounts as one or more <c>otpauth-migration://</c> URIs (Google Authenticator
+    /// format), split into batches so each fits in a scannable QR. Decrypts each secret transiently
+    /// and zeroes it afterward. Requires the vault to be unlocked.
+    /// </summary>
+    public IReadOnlyList<string> ExportToMigrationUris()
+    {
+        EnsureUnlocked();
+        var data = new List<OtpAuthData>(_file.Accounts.Count);
+        try
+        {
+            foreach (Account account in _file.Accounts)
+            {
+                byte[] secret = _vault!.Decrypt(account.Secret);
+                data.Add(new OtpAuthData(account.Issuer, account.Label, secret, account.Algorithm, account.Digits, account.Period));
+            }
+            return OtpAuthMigration.BuildExport(data);
+        }
+        finally
+        {
+            foreach (OtpAuthData d in data)
+                CryptographicOperations.ZeroMemory(d.SecretBytes);
+        }
+    }
+
     /// <summary>Sets, changes, or removes the PIN (empty/null removes it). Re-seals the existing DEK.</summary>
     public void ChangePin(string? newPin)
     {
