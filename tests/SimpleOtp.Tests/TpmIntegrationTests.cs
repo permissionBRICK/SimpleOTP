@@ -91,15 +91,32 @@ public class TpmIntegrationTests
         Skip.IfNot(sealer.IsAvailable, "No usable TPM present.");
 
         byte[] seed = Encoding.ASCII.GetBytes(seedAscii);
-        SealedBlob hmacKey = sealer.ImportHmacKey(seed, algorithm);
+        SealedBlob hmacKey = sealer.ImportHmacKey(seed, algorithm, ReadOnlySpan<byte>.Empty);
 
-        // The TPM MAC must match a software HMAC of the same key+message...
+        // The TPM MAC must match a software HMAC of the same key+message (auth gates use, not the value)...
         byte[] counter = TotpGenerator.CounterBytes(30, DateTime.UnixEpoch.AddSeconds(59));
-        byte[] tpmMac = sealer.ComputeHmac(hmacKey, counter, algorithm);
+        byte[] tpmMac = sealer.ComputeHmac(hmacKey, counter, algorithm, ReadOnlySpan<byte>.Empty);
         using HMAC software = algorithm == OtpAlgorithm.Sha256 ? new HMACSHA256(seed) : new HMACSHA1(seed);
         Assert.Equal(software.ComputeHash(counter), tpmMac);
         // ...and truncate to the published RFC vector.
         Assert.Equal(expected, TotpGenerator.Truncate(tpmMac, 8));
+    }
+
+    [SkippableFact]
+    public void HmacKey_WithAuth_ComputesWithCorrectAuth_OnRealTpm()
+    {
+        Skip.IfNot(Enabled, SkipReason);
+        var sealer = new TpmSecretSealer();
+        Skip.IfNot(sealer.IsAvailable, "No usable TPM present.");
+
+        // Advanced mode locks each HMAC key under the vault key. Verify the auth-carrying path computes
+        // correctly with the RIGHT auth (the MAC value is independent of the auth). Wrong-auth is not
+        // exercised here — it would advance the DA counter; that gating is covered by the fake sealer.
+        byte[] seed = Encoding.ASCII.GetBytes("12345678901234567890");
+        byte[] auth = sealer.GetRandomBytes(32); // stand-in for the vault key
+        SealedBlob key = sealer.ImportHmacKey(seed, OtpAlgorithm.Sha1, auth);
+        byte[] counter = TotpGenerator.CounterBytes(30, DateTime.UnixEpoch.AddSeconds(59));
+        Assert.Equal("94287082", TotpGenerator.Truncate(sealer.ComputeHmac(key, counter, OtpAlgorithm.Sha1, auth), 8));
     }
 
     [SkippableFact]
@@ -114,10 +131,10 @@ public class TpmIntegrationTests
         byte[] seed = Encoding.ASCII.GetBytes("1234567890123456789012345678901234567890123456789012345678901234");
         try
         {
-            SealedBlob blob = sealer.ImportHmacKey(seed, OtpAlgorithm.Sha512);
+            SealedBlob blob = sealer.ImportHmacKey(seed, OtpAlgorithm.Sha512, ReadOnlySpan<byte>.Empty);
             // If this TPM *does* support SHA-512, it must still compute correctly.
             byte[] counter = TotpGenerator.CounterBytes(30, DateTime.UnixEpoch.AddSeconds(59));
-            Assert.Equal("90693936", TotpGenerator.Truncate(sealer.ComputeHmac(blob, counter, OtpAlgorithm.Sha512), 8));
+            Assert.Equal("90693936", TotpGenerator.Truncate(sealer.ComputeHmac(blob, counter, OtpAlgorithm.Sha512, ReadOnlySpan<byte>.Empty), 8));
         }
         catch (UnsupportedAlgorithmException)
         {
@@ -134,7 +151,7 @@ public class TpmIntegrationTests
 
         // The defining Advanced-mode property: an imported HMAC key is a signing object, so the TPM
         // refuses to unseal it — the seed can never be read back out, only used to compute HMACs.
-        SealedBlob hmacKey = sealer.ImportHmacKey(Encoding.ASCII.GetBytes("12345678901234567890"), OtpAlgorithm.Sha1);
+        SealedBlob hmacKey = sealer.ImportHmacKey(Encoding.ASCII.GetBytes("12345678901234567890"), OtpAlgorithm.Sha1, ReadOnlySpan<byte>.Empty);
         Assert.ThrowsAny<SealerException>(() => sealer.Unseal(hmacKey, ReadOnlySpan<byte>.Empty));
     }
 

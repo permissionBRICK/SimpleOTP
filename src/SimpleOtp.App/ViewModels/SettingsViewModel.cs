@@ -98,8 +98,10 @@ public partial class SettingsViewModel : ViewModelBase
             _service.ConvertToAdvanced(pw.Length == 0 ? null : pw);
             IsAdvanced = true;
             ExportProtected = _service.ExportProtected;
-            HasPin = false; // Advanced mode drops the Simple-mode PIN
-            AutoUnlockOn = false;
+            // The PIN and network auto-unlock are preserved across conversion — they now gate the TPM
+            // HMAC keys — so reflect their real state rather than assuming they were cleared.
+            HasPin = _service.PinProtected;
+            AutoUnlockOn = _service.AutoUnlockEnabled;
             MasterPassword = ConfirmMasterPassword = "";
             Changed = true;
             SetMode(ExportProtected
@@ -122,7 +124,9 @@ public partial class SettingsViewModel : ViewModelBase
             _service.ConvertToSimple(MasterPassword);
             IsAdvanced = false;
             ExportProtected = false;
-            HasPin = false;
+            // PIN / auto-unlock are preserved across conversion; show their real state.
+            HasPin = _service.PinProtected;
+            AutoUnlockOn = _service.AutoUnlockEnabled;
             MasterPassword = ConfirmMasterPassword = "";
             Changed = true;
             SetMode("Switched back to Simple Security.", false);

@@ -103,6 +103,37 @@ public sealed class Vault : IDisposable
         }
     }
 
+    /// <summary>
+    /// "Unlocks" a legacy Advanced vault that predates the vault-key gate: it has no sealed key and its
+    /// HMAC keys were created with empty auth, so the in-memory key is empty and HMAC operations present
+    /// empty auth. There is nothing to unseal, so this can't fail.
+    /// </summary>
+    public void UnlockLegacy()
+    {
+        Lock();
+        _dek = Array.Empty<byte>();
+    }
+
+    /// <summary>
+    /// Advanced mode: imports a TOTP secret into the TPM as a non-exportable HMAC key, locked under the
+    /// vault key. Requires the vault to be unlocked.
+    /// </summary>
+    public SealedBlob ImportHmacKey(ReadOnlySpan<byte> secret, OtpAlgorithm algorithm)
+    {
+        EnsureUnlocked();
+        return _sealer.ImportHmacKey(secret, algorithm, _dek!);
+    }
+
+    /// <summary>
+    /// Advanced mode: computes a TOTP HMAC inside the TPM from a key produced by
+    /// <see cref="ImportHmacKey"/>, presenting the vault key as auth. Requires the vault to be unlocked.
+    /// </summary>
+    public byte[] ComputeHmac(SealedBlob hmacKey, ReadOnlySpan<byte> data, OtpAlgorithm algorithm)
+    {
+        EnsureUnlocked();
+        return _sealer.ComputeHmac(hmacKey, data, algorithm, _dek!);
+    }
+
     /// <summary>Encrypts a plaintext secret under the DEK. Requires the vault to be unlocked.</summary>
     public EncryptedSecret Encrypt(ReadOnlySpan<byte> plaintext)
     {

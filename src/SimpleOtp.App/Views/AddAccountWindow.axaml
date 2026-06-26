@@ -68,6 +68,8 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Content="📂 Open image…" Click="OnOpenImage"/>
                     <Button Content="📋 Paste image" Click="OnPasteImage"/>
+                    <Button Content="✂ Snip…" Click="OnSnip" IsVisible="{Binding CanSnip}"
+                            ToolTip.Tip="Capture a region of the screen with the Windows Snipping Tool"/>
                 </StackPanel>
                 <TextBlock Text="…or drag an image file onto this window. A Google Authenticator export QR imports many accounts at once."
                            Foreground="#6F757F" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>

@@ -62,19 +62,20 @@ public sealed class FakeSealer : ISecretSealer
     }
 
     // Models the TPM HMAC key as a device-bound blob holding the key bytes (never returned to the
-    // caller) plus the bound hash algorithm. ComputeHmac decrypts it internally and HMACs in software,
-    // so the API contract — "only the MAC comes out" — matches the real backend; codes are identical.
-    public SealedBlob ImportHmacKey(ReadOnlySpan<byte> secret, OtpAlgorithm algorithm)
+    // caller) plus the bound hash algorithm, locked under the auth value (the vault key). ComputeHmac
+    // decrypts it internally — requiring the same auth — and HMACs in software, so the API contract
+    // ("only the MAC comes out, and only with the right auth") matches the real backend; codes match.
+    public SealedBlob ImportHmacKey(ReadOnlySpan<byte> secret, OtpAlgorithm algorithm, ReadOnlySpan<byte> auth)
     {
         byte[] tagged = [(byte)algorithm, .. secret];
-        SealedBlob blob = Seal(tagged, ReadOnlySpan<byte>.Empty);
+        SealedBlob blob = Seal(tagged, auth);
         CryptographicOperations.ZeroMemory(tagged);
         return blob;
     }
 
-    public byte[] ComputeHmac(SealedBlob hmacKey, ReadOnlySpan<byte> data, OtpAlgorithm algorithm)
+    public byte[] ComputeHmac(SealedBlob hmacKey, ReadOnlySpan<byte> data, OtpAlgorithm algorithm, ReadOnlySpan<byte> auth)
     {
-        byte[] tagged = Unseal(hmacKey, ReadOnlySpan<byte>.Empty);
+        byte[] tagged = Unseal(hmacKey, auth); // wrong auth -> WrongPinException, like the TPM
         try
         {
             if (tagged.Length == 0 || (OtpAlgorithm)tagged[0] != algorithm)

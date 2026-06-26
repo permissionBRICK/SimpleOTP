@@ -38,17 +38,18 @@ public sealed class VaultService : IDisposable
     /// <summary>Which security model this vault uses.</summary>
     public SecurityMode Mode => _file.Mode;
 
-    /// <summary>True if unlocking requires a PIN (Simple mode only).</summary>
+    /// <summary>True if unlocking requires a PIN. Applies to both modes (the PIN seals the vault key).</summary>
     public bool PinProtected => _file.PinProtected;
 
     /// <summary>Advanced mode: true if a master password was set, so secrets can be exported.</summary>
     public bool ExportProtected => _file.ExportProtected;
 
     /// <summary>
-    /// True when the vault can generate codes. Advanced mode is always usable (codes come straight
-    /// from the TPM, no unlock step); Simple mode requires the DEK to be unsealed.
+    /// True when the vault is unlocked. Both modes seal a vault key (DEK) under the PIN / network-unlock:
+    /// Simple mode uses it to decrypt secrets, Advanced mode uses it as the auth that gates the TPM
+    /// HMAC keys. Either way, codes need the key in memory.
     /// </summary>
-    public bool IsUnlocked => _file.Mode == SecurityMode.Advanced || _vault?.IsUnlocked == true;
+    public bool IsUnlocked => _vault?.IsUnlocked == true;
 
     public IReadOnlyList<Account> Accounts => _file.Accounts;
 
@@ -79,7 +80,27 @@ public sealed class VaultService : IDisposable
     public void Unlock(ReadOnlySpan<byte> pin)
     {
         EnsureOpened();
+        if (IsLegacyAdvanced)
+        {
+            _vault!.UnlockLegacy(); // pre-gate Advanced vault: no sealed key to unseal
+            return;
+        }
         _vault!.Unlock(pin);
+    }
+
+    // A vault has a sealed vault key once its DEK blob is populated. Advanced vaults created before the
+    // vault-key gate was added (PIN/network unlock for Advanced) have an empty DEK and empty-auth HMAC
+    // keys; they still generate codes, but can't take a PIN / auto-unlock / mode conversion without a
+    // re-import, so those operations are blocked with a clear message.
+    private bool HasVaultKey => _file.Dek.Public.Length > 0 || _file.Dek.Private.Length > 0;
+    private bool IsLegacyAdvanced => _file.Mode == SecurityMode.Advanced && !HasVaultKey;
+
+    private void EnsureModernVault(string operation)
+    {
+        if (IsLegacyAdvanced)
+            throw new InvalidOperationException(
+                $"This Advanced vault was created by an earlier version without a vault-key gate, so {operation} " +
+                "isn't available. Remove and re-add your accounts (or re-import them) to enable it.");
     }
 
     private void EnsureOpened()
@@ -116,6 +137,7 @@ public sealed class VaultService : IDisposable
     /// </summary>
     public Account AddAccount(OtpAuthData data)
     {
+        EnsureUnlocked();
         var account = new Account
         {
             Issuer = data.Issuer,
@@ -128,14 +150,12 @@ public sealed class VaultService : IDisposable
         {
             if (_file.Mode == SecurityMode.Advanced)
             {
-                ValidateDevice();
-                account.HmacKey = _sealer.ImportHmacKey(data.SecretBytes, data.Algorithm);
+                account.HmacKey = _vault!.ImportHmacKey(data.SecretBytes, data.Algorithm);
                 if (_file.ExportProtected)
                     account.ExportCopy = ExportProtection.Encrypt(_file.ExportPublicKey!, data.SecretBytes);
             }
             else
             {
-                EnsureUnlocked();
                 account.Secret = _vault!.Encrypt(data.SecretBytes);
             }
         }
@@ -161,17 +181,17 @@ public sealed class VaultService : IDisposable
     /// </summary>
     public string GenerateCode(Account account, DateTime? utc = null)
     {
+        EnsureUnlocked();
         DateTime when = (utc ?? DateTime.UtcNow);
         if (_file.Mode == SecurityMode.Advanced)
         {
             if (account.HmacKey is null)
                 throw new InvalidOperationException("Account has no TPM HMAC key.");
             byte[] counter = TotpGenerator.CounterBytes(account.Period, when);
-            byte[] mac = _sealer.ComputeHmac(account.HmacKey, counter, account.Algorithm);
+            byte[] mac = _vault!.ComputeHmac(account.HmacKey, counter, account.Algorithm);
             return TotpGenerator.Truncate(mac, account.Digits);
         }
 
-        EnsureUnlocked();
         byte[] secret = _vault!.Decrypt(account.Secret!);
         try
         {
@@ -251,16 +271,17 @@ public sealed class VaultService : IDisposable
 
     /// <summary>
     /// Converts a Simple vault to Advanced Security: each secret is re-homed into the TPM as a
-    /// non-exportable HMAC key. If <paramref name="masterPassword"/> is non-empty, a recoverable
-    /// export copy of each secret is also kept (encrypted to a fresh key sealed under the password),
-    /// so the vault can still be exported or converted back later. With no password, the seeds become
-    /// permanently non-exportable. Requires the (Simple) vault to be unlocked.
+    /// non-exportable HMAC key, locked under the existing vault key. The vault key, PIN and network
+    /// auto-unlock are KEPT — so the same lock that protected Simple mode now gates code generation in
+    /// Advanced mode. If <paramref name="masterPassword"/> is non-empty, a recoverable export copy of
+    /// each secret is also kept so the vault can still be exported or converted back later; with no
+    /// password the seeds become permanently non-exportable. Requires the vault to be unlocked.
     /// </summary>
     public void ConvertToAdvanced(string? masterPassword)
     {
         if (_file.Mode == SecurityMode.Advanced)
             throw new InvalidOperationException("Vault is already in Advanced Security mode.");
-        EnsureUnlocked(); // need the DEK to read the existing secrets
+        EnsureUnlocked(); // need the vault key to read the existing secrets and to lock the HMAC keys
 
         byte[] pwBytes = PinBytes(masterPassword);
         ExportProtection.KeyPair? keyPair = null;
@@ -283,7 +304,7 @@ public sealed class VaultService : IDisposable
                 byte[] secret = _vault!.Decrypt(account.Secret!);
                 try
                 {
-                    SealedBlob hmacKey = _sealer.ImportHmacKey(secret, account.Algorithm);
+                    SealedBlob hmacKey = _vault!.ImportHmacKey(secret, account.Algorithm);
                     ExportCopy? copy = publicKey is not null ? ExportProtection.Encrypt(publicKey, secret) : null;
                     pending.Add((account, hmacKey, copy));
                 }
@@ -293,7 +314,8 @@ public sealed class VaultService : IDisposable
                 }
             }
 
-            // Commit.
+            // Commit. The vault key (DEK), PIN and auto-unlock are deliberately left untouched — they now
+            // gate the TPM HMAC keys instead of decrypting AES secrets.
             foreach ((Account account, SealedBlob hmacKey, ExportCopy? copy) in pending)
             {
                 account.HmacKey = hmacKey;
@@ -303,13 +325,6 @@ public sealed class VaultService : IDisposable
             _file.Mode = SecurityMode.Advanced;
             _file.ExportKeySealed = sealedPrivate;
             _file.ExportPublicKey = publicKey;
-            // Tear down Simple-mode state.
-            _file.Dek = new SealedBlob([], []);
-            _file.DekAuto = null;
-            _file.AutoUnlock = null;
-            _file.PinProtected = false;
-            _vault?.Dispose();
-            _vault = null;
             Save();
         }
         finally
@@ -321,8 +336,9 @@ public sealed class VaultService : IDisposable
 
     /// <summary>
     /// Converts an Advanced vault back to Simple Security. Only possible if a master password was set
-    /// (otherwise the seeds are unrecoverable). Recovers every secret with the password, then seals a
-    /// fresh DEK and re-encrypts the secrets under it. The vault is left unlocked with no PIN.
+    /// (otherwise the seeds are unrecoverable). Recovers every secret with the password and re-encrypts
+    /// it under the existing vault key. The vault key, PIN and auto-unlock are KEPT. Requires the vault
+    /// to be unlocked.
     /// </summary>
     /// <exception cref="InvalidOperationException">The Advanced vault has no master password.</exception>
     /// <exception cref="WrongPinException">The master password was wrong.</exception>
@@ -334,7 +350,8 @@ public sealed class VaultService : IDisposable
             throw new InvalidOperationException(
                 "This Advanced vault has no master password, so its secrets cannot be recovered. " +
                 "Converting back to Simple is not possible.");
-        ValidateDevice();
+        EnsureUnlocked(); // need the vault key to re-encrypt the recovered secrets
+        EnsureModernVault("converting back to Simple");
 
         byte[] pwBytes = PinBytes(masterPassword);
         byte[]? priv = null;
@@ -349,18 +366,13 @@ public sealed class VaultService : IDisposable
                 recovered.Add((account, ExportProtection.Decrypt(priv, _file.ExportPublicKey!, account.ExportCopy)));
             }
 
-            var vault = Vault.Create(_sealer, ReadOnlySpan<byte>.Empty); // fresh DEK, no PIN
             foreach ((Account account, byte[] secret) in recovered)
             {
-                account.Secret = vault.Encrypt(secret);
+                account.Secret = _vault!.Encrypt(secret); // re-encrypt under the retained vault key
                 account.HmacKey = null;
                 account.ExportCopy = null;
             }
-            _vault?.Dispose();
-            _vault = vault;
             _file.Mode = SecurityMode.Simple;
-            _file.Dek = vault.SealedDek;
-            _file.PinProtected = false;
             _file.ExportKeySealed = null;
             _file.ExportPublicKey = null;
             Save();
@@ -378,6 +390,7 @@ public sealed class VaultService : IDisposable
     public void ChangePin(string? newPin)
     {
         EnsureUnlocked();
+        EnsureModernVault("setting a PIN");
         _vault!.ChangePin(PinBytes(newPin));
         _file.PinProtected = _vault.PinProtected;
         _file.Dek = _vault.SealedDek;
@@ -400,6 +413,7 @@ public sealed class VaultService : IDisposable
     public string EnableAutoUnlock(AutoUnlockConfig config, string? autoUnlockKey = null)
     {
         EnsureUnlocked();
+        EnsureModernVault("network auto-unlock");
         string keyString = string.IsNullOrEmpty(autoUnlockKey)
             ? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             : autoUnlockKey;

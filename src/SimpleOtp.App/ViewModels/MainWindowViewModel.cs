@@ -31,10 +31,10 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _isConnecting;
     [ObservableProperty] private bool _isLoading;
 
-    /// <summary>Advanced Security mode: codes come straight from the TPM, so there is no lock step.</summary>
+    /// <summary>True in Advanced Security mode — drives the "ADVANCED" badge. Both modes still unlock/lock.</summary>
     [ObservableProperty] private bool _isAdvancedMode;
 
-    /// <summary>Whether the lock button applies (Simple mode, ready). Advanced mode has nothing to lock.</summary>
+    /// <summary>Whether the lock button applies (ready and unlocked). Both modes can be locked.</summary>
     [ObservableProperty] private bool _canLock;
 
     /// <summary>True when network auto-unlock is configured (controls the "retry" button on the lock screen).</summary>
@@ -89,14 +89,11 @@ public partial class MainWindowViewModel : ViewModelBase
             AutoUnlockAvailable = service.AutoUnlockEnabled;
             IsAdvancedMode = service.Mode == SecurityMode.Advanced;
 
-            if (IsAdvancedMode)
+            // Both modes seal a vault key under the PIN / network-unlock, so the unlock flow is the same;
+            // Advanced just uses that key as the HMAC auth rather than an AES key.
+            if (!service.IsInitialized)
             {
-                await Task.Run(service.ValidateDevice); // wrong TPM → WrongDeviceException
-                EnterReady();
-            }
-            else if (!service.IsInitialized)
-            {
-                await Task.Run(() => service.CreateNew(ReadOnlySpan<byte>.Empty)); // first run: no PIN by default
+                await Task.Run(() => service.CreateNew(ReadOnlySpan<byte>.Empty)); // first run: Simple, no PIN
                 EnterReady();
             }
             else if (!service.PinProtected)
@@ -177,7 +174,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private void Lock()
     {
-        if (Service is null || !IsReady || IsAdvancedMode) return;
+        if (Service is null || !IsReady) return;
         _timer.Stop();
         Tokens.Clear();
         HasAccounts = false;
@@ -213,7 +210,7 @@ public partial class MainWindowViewModel : ViewModelBase
         IsAdvancedMode = Service?.Mode == SecurityMode.Advanced;
         PinSet = Service?.PinProtected ?? false;
         AutoUnlockAvailable = Service?.AutoUnlockEnabled ?? false;
-        CanLock = IsReady && !IsAdvancedMode;
+        CanLock = IsReady;
         ReloadTokens(); // a mode switch rewrote how each secret is stored; rebuild the cards
     }
 
@@ -250,7 +247,7 @@ public partial class MainWindowViewModel : ViewModelBase
         IsError = error;
         IsConnecting = connecting;
         IsLoading = loading;
-        CanLock = ready && !IsAdvancedMode;
+        CanLock = ready;
     }
 
     private void SetError(string message)
