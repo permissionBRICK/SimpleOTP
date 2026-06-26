@@ -321,7 +321,11 @@ public static class OtpAuthMigration
             {
                 case Varint: ReadVarint(); break;
                 case 1: _pos += 8; break;            // 64-bit
-                case LengthDelimited: _pos += (int)ReadVarint(); break;
+                // Read the length into a local FIRST: `_pos += ReadVarint()` would capture _pos before
+                // ReadVarint advances it past the length bytes, under-counting by the varint's width and
+                // derailing the parse of any later field. Newer Google Authenticator exports add an
+                // unknown length-delimited field per account, which is exactly what hits this path.
+                case LengthDelimited: { int length = (int)ReadVarint(); _pos += length; break; }
                 case 5: _pos += 4; break;            // 32-bit
                 default: throw new FormatException($"Unknown protobuf wire type {wire}.");
             }

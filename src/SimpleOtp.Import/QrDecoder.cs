@@ -52,10 +52,38 @@ public static class QrDecoder
         catch (Exception) { return null; }
     }
 
+    // ZXing sometimes fails to locate a dense, JPEG-compressed QR at the image's native resolution
+    // (e.g. a full-screen authenticator-export screenshot) but succeeds once it is resampled. So if the
+    // native attempt fails, retry at a few scales and return the first that decodes. Native first keeps
+    // the common case fast; the downscales reliably recover the dense exports, the upscales help small
+    // or slightly blurry codes.
+    private static readonly float[] RetryScales = [1.0f, 0.75f, 0.5f, 1.5f, 2.0f, 0.4f];
+
     private static string? Decode(SKBitmap? bitmap)
     {
         if (bitmap is null) return null; // unrecognized / corrupt image
-        Result? result = CreateReader().Decode(bitmap);
-        return result?.Text;
+        BarcodeReader reader = CreateReader();
+        foreach (float scale in RetryScales)
+        {
+            SKBitmap? scaled = scale == 1.0f ? bitmap : Resize(bitmap, scale);
+            if (scaled is null) continue;
+            try
+            {
+                Result? result = reader.Decode(scaled);
+                if (result?.Text is { } text) return text;
+            }
+            finally
+            {
+                if (!ReferenceEquals(scaled, bitmap)) scaled.Dispose();
+            }
+        }
+        return null;
+    }
+
+    private static SKBitmap? Resize(SKBitmap src, float factor)
+    {
+        int w = (int)(src.Width * factor), h = (int)(src.Height * factor);
+        if (w < 1 || h < 1) return null;
+        return src.Resize(new SKImageInfo(w, h), SKFilterQuality.High);
     }
 }

@@ -115,6 +115,40 @@ public class OtpAuthMigrationTests
     }
 
     [Fact]
+    public void Parses_OtpParameters_WithUnknownTrailingFields()
+    {
+        // Real Google Authenticator exports carry newer, unmodeled fields per account — notably a
+        // length-delimited field 8. Those must be skipped, not derail the parse. Regression guard for
+        // the Skip(length-delimited) off-by-one that broke multi-account real exports.
+        byte[] seed = Encoding.ASCII.GetBytes("12345678901234567890");
+
+        var p = new List<byte>();
+        WriteLengthDelimited(p, 1, seed);                       // secret
+        WriteString(p, 2, "octocat");                           // name
+        WriteString(p, 3, "GitHub");                            // issuer
+        WriteVarintField(p, 4, 1);                              // algorithm SHA1
+        WriteVarintField(p, 5, 1);                              // digits 6
+        WriteVarintField(p, 6, 2);                              // type TOTP
+        WriteLengthDelimited(p, 8, [10, 20, 30, 40, 50]);       // UNKNOWN length-delimited field (the trigger)
+        WriteString(p, 9, "future-metadata");                   // another unknown length-delimited field
+
+        var payload = new List<byte>();
+        WriteLengthDelimited(payload, 1, p.ToArray());          // account 0
+        WriteLengthDelimited(payload, 1, p.ToArray());          // account 1 (misalignment would cascade here)
+        WriteVarintField(payload, 2, 1);                        // version
+        WriteLengthDelimited(payload, 7, [1, 2, 3]);            // unknown top-level length-delimited field
+        string uri = "otpauth-migration://offline?data=" + Uri.EscapeDataString(Convert.ToBase64String(payload.ToArray()));
+
+        var accounts = OtpAuthMigration.Parse(uri);
+        Assert.Equal(2, accounts.Count);
+        Assert.Equal("GitHub", accounts[0].Issuer);
+        Assert.Equal("octocat", accounts[0].Label);
+        Assert.Equal(seed, accounts[0].SecretBytes);
+        Assert.Equal(OtpAlgorithm.Sha1, accounts[0].Algorithm);
+        Assert.Equal(seed, accounts[1].SecretBytes);
+    }
+
+    [Fact]
     public void LooksLikeUri_Detects() =>
         Assert.True(OtpAuthMigration.LooksLikeUri("otpauth-migration://offline?data=AAAA"));
 
