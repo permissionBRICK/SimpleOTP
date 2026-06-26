@@ -1,10 +1,37 @@
+using System.Linq;
 using SimpleOtp.App.ViewModels;
 using SimpleOtp.Core.Model;
+using SimpleOtp.Core.Totp;
 
 namespace SimpleOtp.Tests;
 
 public class AddAccountViewModelTests
 {
+    [Fact]
+    public void MultiPartMigration_AccumulatesAcrossParts_AndDedupes()
+    {
+        // A large export splits into several QRs; the importer must combine them.
+        OtpAuthData[] accounts = [.. Enumerable.Range(0, 8).Select(i =>
+            new OtpAuthData($"Issuer{i}", $"user{i}@example.com", [(byte)i, 1, 2, 3, 4, 5, 6, 7, 8, 9], OtpAlgorithm.Sha1, 6, 30))];
+        var parts = OtpAuthMigration.BuildExport(accounts, maxPayloadBytes: 150);
+        Assert.True(parts.Count >= 2); // forced into multiple parts
+
+        var vm = new AddAccountViewModel();
+        vm.ApplyDecoded(parts[0]);
+        Assert.True(vm.IsBulk);
+        int afterFirst = vm.BulkItems.Count;
+
+        vm.ApplyDecoded(parts[1]);
+        Assert.True(vm.BulkItems.Count > afterFirst); // accumulated, not replaced
+
+        for (int i = 2; i < parts.Count; i++)
+            vm.ApplyDecoded(parts[i]);
+        Assert.Equal(8, vm.SelectedAccounts().Count); // all parts combined
+
+        vm.ApplyDecoded(parts[0]); // re-loading a part doesn't duplicate
+        Assert.Equal(8, vm.SelectedAccounts().Count);
+    }
+
     [Fact]
     public void LoadFromPaste_Uri_PopulatesAllFields()
     {

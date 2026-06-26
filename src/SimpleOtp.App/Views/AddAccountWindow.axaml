@@ -50,7 +50,7 @@
                        FontSize="11" VerticalAlignment="Center"/>
             <Button Grid.Column="1" Content="Cancel" MinWidth="84" Margin="0,0,10,0"
                     HorizontalContentAlignment="Center" Click="OnCancel"/>
-            <Button Grid.Column="2" Classes="primary" Content="Add" MinWidth="84"
+            <Button Grid.Column="2" Classes="primary" Content="{Binding AddButtonText}" MinWidth="84"
                     HorizontalContentAlignment="Center" Click="OnAdd"/>
         </Grid>
 
@@ -60,7 +60,7 @@
 
                 <TextBlock Classes="section" Text="PASTE A LINK OR SECRET"/>
                 <TextBox Text="{Binding PasteInput}" AcceptsReturn="True" Height="64"
-                         TextWrapping="Wrap" Watermark="otpauth://totp/...  or a Base32 secret"/>
+                         TextWrapping="Wrap" PlaceholderText="otpauth://totp/...  or a Base32 secret"/>
                 <Button Content="Load" HorizontalAlignment="Left" Margin="0,6,0,0"
                         Command="{Binding LoadFromPasteCommand}"/>
 
@@ -69,33 +69,62 @@
                     <Button Content="📂 Open image…" Click="OnOpenImage"/>
                     <Button Content="📋 Paste image" Click="OnPasteImage"/>
                 </StackPanel>
-                <TextBlock Text="…or drag an image file onto this window." Foreground="#6F757F"
-                           FontSize="11" Margin="0,4,0,0"/>
+                <TextBlock Text="…or drag an image file onto this window. A Google Authenticator export QR imports many accounts at once."
+                           Foreground="#6F757F" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
 
-                <TextBlock Classes="section" Text="DETAILS"/>
-                <TextBlock Classes="field" Text="Issuer (service)"/>
-                <TextBox Text="{Binding Issuer}" Watermark="e.g. GitHub"/>
-                <TextBlock Classes="field" Text="Label (account)"/>
-                <TextBox Text="{Binding Label}" Watermark="e.g. alice@example.com"/>
-                <TextBlock Classes="field" Text="Secret (Base32)"/>
-                <TextBox Text="{Binding Secret}" FontFamily="Cascadia Code,Consolas,monospace"
-                         Watermark="JBSWY3DPEHPK3PXP"/>
+                <!-- Single-account details (hidden during a bulk export import) -->
+                <StackPanel IsVisible="{Binding !IsBulk}">
+                    <TextBlock Classes="section" Text="DETAILS"/>
+                    <TextBlock Classes="field" Text="Issuer (service)"/>
+                    <TextBox Text="{Binding Issuer}" PlaceholderText="e.g. GitHub"/>
+                    <TextBlock Classes="field" Text="Label (account)"/>
+                    <TextBox Text="{Binding Label}" PlaceholderText="e.g. alice@example.com"/>
+                    <TextBlock Classes="field" Text="Secret (Base32)"/>
+                    <TextBox Text="{Binding Secret}" FontFamily="Cascadia Code,Consolas,monospace"
+                             PlaceholderText="JBSWY3DPEHPK3PXP"/>
 
-                <Grid ColumnDefinitions="*,*,*" Margin="0,6,0,0">
-                    <StackPanel Grid.Column="0" Margin="0,0,6,0">
-                        <TextBlock Classes="field" Text="Algorithm"/>
-                        <ComboBox ItemsSource="{Binding Algorithms}" SelectedIndex="{Binding SelectedAlgorithmIndex}"
-                                  HorizontalAlignment="Stretch"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Margin="3,0">
-                        <TextBlock Classes="field" Text="Digits"/>
-                        <TextBox Text="{Binding Digits}"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" Margin="6,0,0,0">
-                        <TextBlock Classes="field" Text="Period (s)"/>
-                        <TextBox Text="{Binding Period}"/>
-                    </StackPanel>
-                </Grid>
+                    <Grid ColumnDefinitions="*,*,*" Margin="0,6,0,0">
+                        <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                            <TextBlock Classes="field" Text="Algorithm"/>
+                            <ComboBox ItemsSource="{Binding Algorithms}" SelectedIndex="{Binding SelectedAlgorithmIndex}"
+                                      HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="3,0">
+                            <TextBlock Classes="field" Text="Digits"/>
+                            <TextBox Text="{Binding Digits}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Margin="6,0,0,0">
+                            <TextBlock Classes="field" Text="Period (s)"/>
+                            <TextBox Text="{Binding Period}"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+
+                <!-- Bulk import preview (Google Authenticator export, possibly multiple QR parts) -->
+                <StackPanel IsVisible="{Binding IsBulk}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Classes="section" Text="ACCOUNTS IN THIS EXPORT"/>
+                        <Button Grid.Column="1" Content="Clear" FontSize="11" Padding="8,2"
+                                Command="{Binding ClearBulkCommand}"/>
+                    </Grid>
+                    <Border Background="#1B1D21" CornerRadius="6" Padding="6" MaxHeight="280">
+                        <ScrollViewer>
+                            <ItemsControl ItemsSource="{Binding BulkItems}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:MigrationItemViewModel">
+                                        <CheckBox IsChecked="{Binding IsSelected}" Margin="2,1" Foreground="#C9CDD4">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Title}" Foreground="#E7E9EC"/>
+                                                <TextBlock Text="{Binding Detail}" Foreground="#8A8F99" FontSize="11"
+                                                           IsVisible="{Binding Detail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                                            </StackPanel>
+                                        </CheckBox>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Border>
+                </StackPanel>
 
                 <Border Margin="0,12,0,0" IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                         Background="#20242A" CornerRadius="6" Padding="10,8">

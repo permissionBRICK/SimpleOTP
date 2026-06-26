@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -55,19 +56,43 @@ public partial class MainWindow : Window
         if (Vm?.Service is null)
             return;
         var dialog = new AddAccountWindow();
-        OtpAuthData? data = await dialog.ShowDialog<OtpAuthData?>(this);
-        if (data is null)
+        var accounts = await dialog.ShowDialog<IReadOnlyList<OtpAuthData>?>(this);
+        if (accounts is null || accounts.Count == 0)
             return;
         try
         {
-            Vm.Service.AddAccount(data);
+            foreach (OtpAuthData data in accounts)
+                Vm.Service.AddAccount(data);
             Vm.ReloadTokens();
-            await Vm.ShowToastAsync("Account added");
+            await Vm.ShowToastAsync(accounts.Count == 1 ? "Account added" : $"{accounts.Count} accounts added");
         }
         catch (Exception ex)
         {
             await Dialogs.AlertAsync(this, "Couldn't add account", ex.Message);
         }
+    }
+
+    private async void OnExportClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm?.Service is null)
+            return;
+        IReadOnlyList<string> uris;
+        try
+        {
+            uris = Vm.Service.ExportToMigrationUris();
+        }
+        catch (Exception ex)
+        {
+            await Dialogs.AlertAsync(this, "Couldn't export", ex.Message);
+            return;
+        }
+        if (uris.Count == 0)
+        {
+            await Dialogs.AlertAsync(this, "Nothing to export", "Add some accounts first.");
+            return;
+        }
+        var dialog = new ExportWindow(uris, Vm.Tokens.Count);
+        await dialog.ShowDialog(this);
     }
 
     private void OnLockClick(object? sender, RoutedEventArgs e) => Vm?.LockCommand.Execute(null);

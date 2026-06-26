@@ -107,11 +107,23 @@ XAML/view-locator uses reflection and breaks under aggressive trimming.)
   - **Paste** an `otpauth://totp/...` link **or** a raw Base32 secret, then *Load*.
   - **Import a QR screenshot**: *Open image…*, *Paste image* (e.g. after `Win`+`Shift`+`S`), or
     **drag an image file** onto the window.
+  - **Google Authenticator bulk export**: import an `otpauth-migration://` export QR (Authenticator →
+    *Transfer accounts* → *Export*) to add **many accounts at once**. The dialog lists every TOTP
+    account found with checkboxes so you can pick which to import (HOTP entries are skipped). If the
+    export spans **multiple QR codes**, open or drag **all of them** (or open several at once) — the
+    parts are combined and de-duplicated, and the dialog shows how many of the N parts you've loaded.
   - **Manual entry**: issuer, label, secret, algorithm, digits, period.
+- **📤 Export** generates a Google-Authenticator-format migration QR from all your accounts —
+  splitting into **multiple QR codes** automatically when there are too many for one — so you can
+  move them to another authenticator (or back into SimpleOTP). You can page through the QR(s) and
+  **save them as PNGs**. (The migration format always uses a 30-second period and 6/8-digit codes.)
 - **Click a card** to copy its current code (a "Copied" toast confirms).
 - **⚙ Settings** to set / change / remove the TPM‑enforced PIN, and to configure **network
   auto-unlock** (see above).
 - **🔒 Lock** to clear the unlocked key from memory until the PIN is re-entered.
+
+![bulk import](docs/screenshot-bulk.png)
+![export](docs/screenshot-export.png)
 
 By default there is **no PIN** — secrets are bound to the device + your OS account. Enable a PIN for
 an extra factor.
