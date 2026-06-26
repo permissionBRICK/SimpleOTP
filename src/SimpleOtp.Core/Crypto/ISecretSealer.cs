@@ -1,3 +1,5 @@
+using SimpleOtp.Core.Model;
+
 namespace SimpleOtp.Core.Crypto;
 
 /// <summary>
@@ -32,4 +34,24 @@ public interface ISecretSealer
     /// <exception cref="WrongDeviceException">The blob does not belong to this TPM.</exception>
     /// <exception cref="TpmLockedException">The TPM is in dictionary-attack lockout.</exception>
     byte[] Unseal(SealedBlob blob, ReadOnlySpan<byte> auth);
+
+    /// <summary>
+    /// Imports a TOTP <paramref name="secret"/> as a <b>non-exportable</b> HMAC key bound to this
+    /// device, returning the wrapped key blob to persist. The raw secret cannot be recovered from the
+    /// blob — it can only be used to compute HMACs via <see cref="ComputeHmac"/>, inside the sealer.
+    /// This backs Advanced Security mode.
+    /// </summary>
+    /// <param name="secret">The raw shared-secret key bytes.</param>
+    /// <param name="algorithm">The HMAC hash the resulting key is permanently bound to.</param>
+    SealedBlob ImportHmacKey(ReadOnlySpan<byte> secret, OtpAlgorithm algorithm);
+
+    /// <summary>
+    /// Computes <c>HMAC(key, data)</c> using a key previously produced by <see cref="ImportHmacKey"/>,
+    /// entirely inside the sealer. Only the MAC is returned; the key never leaves the device.
+    /// </summary>
+    /// <param name="hmacKey">A blob from <see cref="ImportHmacKey"/>.</param>
+    /// <param name="data">The message to authenticate (the TOTP time counter).</param>
+    /// <param name="algorithm">The HMAC hash the key was imported with.</param>
+    /// <exception cref="WrongDeviceException">The blob does not belong to this TPM.</exception>
+    byte[] ComputeHmac(SealedBlob hmacKey, ReadOnlySpan<byte> data, OtpAlgorithm algorithm);
 }

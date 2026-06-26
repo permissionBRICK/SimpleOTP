@@ -32,3 +32,12 @@ public sealed class TpmLockedException : SealerException
 {
     public TpmLockedException(string message, Exception? inner = null) : base(message, inner) { }
 }
+
+/// <summary>
+/// The TPM cannot host an HMAC key for the requested hash algorithm (Advanced mode). Many firmware
+/// TPMs support SHA-1/SHA-256 but not SHA-512, so such accounts must stay in Simple mode.
+/// </summary>
+public sealed class UnsupportedAlgorithmException : SealerException
+{
+    public UnsupportedAlgorithmException(string message, Exception? inner = null) : base(message, inner) { }
+}

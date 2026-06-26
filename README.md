@@ -17,8 +17,8 @@ imports TOTP seeds into the TPM). SimpleOTP keeps that device-binding idea and i
 
 | | `totpm` (reference) | **SimpleOTP** |
 |---|---|---|
-| Secret protection | Seed imported into TPM as an HMAC key | Seed AES‑256‑GCM encrypted; key (DEK) sealed to TPM |
-| PIN / auth | **None** — any local process as your user can mint codes | **Optional, TPM‑enforced PIN** |
+| Secret protection | Seed imported into TPM as an HMAC key | **Two modes** — Simple (seed AES‑256‑GCM under a TPM‑sealed key) or Advanced (seed imported into the TPM as a non‑exportable HMAC key, HMAC computed in‑chip) |
+| PIN / auth | **None** — any local process as your user can mint codes | **Optional, TPM‑enforced PIN** (Simple); optional master password for export (Advanced) |
 | Algorithms | SHA1 only (URI field ignored) | SHA1 / SHA256 / SHA512 honored |
 | Interface | CLI | GUI (Avalonia), like a phone authenticator |
 | Persistent TPM state | Transient (re-derives SRK each run) | Transient — **never writes to TPM NV storage** |
@@ -40,6 +40,29 @@ imports TOTP seeds into the TPM). SimpleOTP keeps that device-binding idea and i
 
 The PIN, when set, is the TPM object's auth value. Wrong PINs feed the TPM's dictionary‑attack
 lockout, so brute force is throttled by hardware. There is **no PIN recovery**.
+
+### Security modes: Simple vs Advanced
+
+Switch any time under **⚙ Settings → Security mode**:
+
+- **Simple Security** (default) — the model above: each seed is AES‑256‑GCM ciphertext under a
+  TPM‑sealed DEK. The seed is briefly in memory to compute a code, and accounts export freely.
+  Supports the optional PIN and network auto-unlock.
+- **Advanced Security** — each seed is imported into the TPM as a **non‑exportable HMAC key**
+  (`FixedTPM` / `FixedParent`), and the TOTP HMAC is computed **inside the chip** — only the
+  6/8‑digit code ever leaves the TPM, never the seed. This is `totpm`'s model, taken further: the key
+  is genuinely non‑duplicable. Generating codes and adding accounts need no PIN or password.
+
+  Exporting is the deliberate trade-off. Set a **master password** when switching to Advanced and the
+  app keeps an encrypted, recoverable copy of each seed (ECIES: encrypting needs only a public key, so
+  adding accounts never prompts — the private key is TPM‑sealed under your password and recovered only
+  when you export). Skip the password and the seeds are **permanently non‑exportable** — keep your
+  original QR codes. You can convert back to Simple only if a password was set.
+
+  > Some firmware TPMs support SHA‑1/SHA‑256 keyed‑hash keys but not SHA‑512. A SHA‑512 account can't
+  > be hosted in Advanced mode on such a chip; it stays in Simple mode with a clear message.
+
+![advanced security](docs/screenshot-advanced.png)
 
 ### Network auto-unlock (optional)
 
@@ -179,6 +202,14 @@ transient object** and flushes it — nothing persists in the TPM):
 
 ```bash
 SIMPLEOTP_TPM_TEST=1 dotnet test --filter FullyQualifiedName~TpmIntegrationTests
+```
+
+One test deliberately fails an auth to prove the PIN is enforced, which advances the TPM's
+dictionary-attack counter. On a shared chip with a low `MaxAuthFail` that can eventually trip
+lockout, so it is gated behind a **second** opt-in and stays skipped above:
+
+```bash
+SIMPLEOTP_TPM_TEST=1 SIMPLEOTP_TPM_DA_TEST=1 dotnet test --filter FullyQualifiedName~TpmIntegrationTests
 ```
 
 ## Key dependencies

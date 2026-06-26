@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using SimpleOtp.Core.Crypto;
+using SimpleOtp.Core.Model;
 using Tpm2Lib;
 
 namespace SimpleOtp.Tpm;
@@ -154,6 +155,115 @@ public sealed class TpmSecretSealer : ISecretSealer
         }
     }
 
+    public SealedBlob ImportHmacKey(ReadOnlySpan<byte> secret, OtpAlgorithm algorithm)
+    {
+        if (secret.IsEmpty) throw new ArgumentException("Secret is empty.", nameof(secret));
+        byte[] keyArr = secret.ToArray();
+        TpmAlgId hashAlg = ToTpmHash(algorithm);
+        try
+        {
+            using var dev = ConnectDevice();
+            using var tpm = new Tpm2(dev);
+            TpmHandle srk = CreateSrk(tpm);
+            try
+            {
+                // Externally-supplied key bytes (SensitiveDataOrigin clear) created directly under the
+                // SRK as a FixedTPM/FixedParent HMAC key: the seed can never be unsealed or duplicated,
+                // only used for HMAC. This is stronger than the reference design (totpm), which had to
+                // leave FixedTPM clear because it used TPM2_Import.
+                TpmPrivate priv = tpm._AllowErrors().Create(
+                    srk,
+                    new SensitiveCreate(Array.Empty<byte>(), keyArr),
+                    HmacTemplate(hashAlg),
+                    Array.Empty<byte>(),
+                    Array.Empty<PcrSelection>(),
+                    out TpmPublic pub, out _, out _, out _);
+                TpmRc rc = tpm._GetLastResponseCode();
+                if (rc == TpmRc.Hash)
+                    throw new UnsupportedAlgorithmException(
+                        $"This TPM cannot create a {algorithm} HMAC key (the chip does not support that hash). " +
+                        $"Keep {algorithm}-based accounts in Simple Security mode.");
+                if (rc != TpmRc.Success || priv is null)
+                    throw new SealerException($"TPM rejected the HMAC-key import (rc={rc}).");
+                return new SealedBlob(pub.GetTpmRepresentation(), priv.GetTpmRepresentation());
+            }
+            finally
+            {
+                tpm.FlushContext(srk);
+            }
+        }
+        catch (SealerException)
+        {
+            throw;
+        }
+        catch (TpmException ex)
+        {
+            throw new SealerException($"TPM HMAC-key import failed: {ex.Message}", ex);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(keyArr);
+        }
+    }
+
+    public byte[] ComputeHmac(SealedBlob hmacKey, ReadOnlySpan<byte> data, OtpAlgorithm algorithm)
+    {
+        byte[] dataArr = data.ToArray();
+        TpmAlgId hashAlg = ToTpmHash(algorithm);
+        try
+        {
+            using var dev = ConnectDevice();
+            using var tpm = new Tpm2(dev);
+            TpmHandle srk = CreateSrk(tpm);
+            try
+            {
+                var pub = Marshaller.FromTpmRepresentation<TpmPublic>(hmacKey.Public);
+                var priv = Marshaller.FromTpmRepresentation<TpmPrivate>(hmacKey.Private);
+
+                TpmHandle loaded = tpm._AllowErrors().Load(srk, priv, pub);
+                TpmRc loadRc = tpm._GetLastResponseCode();
+                if (loadRc != TpmRc.Success || loaded is null)
+                    throw new WrongDeviceException(
+                        $"The TPM could not load this account's HMAC key (rc={loadRc}). " +
+                        "The vault was likely created on a different device, or the TPM was cleared/reset.");
+                try
+                {
+                    // The counter is 8 bytes, well within one HMAC buffer, so a single TPM2_HMAC suffices
+                    // (no HMAC sequence needed). The MAC is computed inside the TPM; the key never leaves.
+                    return tpm.Hmac(loaded, dataArr, hashAlg);
+                }
+                finally
+                {
+                    tpm.FlushContext(loaded);
+                }
+            }
+            finally
+            {
+                tpm.FlushContext(srk);
+            }
+        }
+        catch (SealerException)
+        {
+            throw;
+        }
+        catch (TpmException ex)
+        {
+            throw new SealerException($"TPM HMAC computation failed: {ex.Message}", ex);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(dataArr);
+        }
+    }
+
+    private static TpmAlgId ToTpmHash(OtpAlgorithm algorithm) => algorithm switch
+    {
+        OtpAlgorithm.Sha256 => TpmAlgId.Sha256,
+        OtpAlgorithm.Sha512 => TpmAlgId.Sha512,
+        OtpAlgorithm.Sha1 => TpmAlgId.Sha1,
+        _ => throw new SealerException($"Unsupported HMAC algorithm {algorithm}."),
+    };
+
     // TPM auth values are limited to the object's nameAlg digest size (32 bytes for SHA256). Hash any
     // non-empty secret (PIN or auto-unlock key) to a fixed 32 bytes so arbitrary-length inputs are
     // accepted; keep empty as empty so "no PIN" remains a genuine empty auth value.
@@ -187,6 +297,16 @@ public sealed class TpmSecretSealer : ISecretSealer
         ObjectAttr.UserWithAuth | ObjectAttr.FixedTPM | ObjectAttr.FixedParent,
         Array.Empty<byte>(),
         new KeyedhashParms(new NullSchemeKeyedhash()),
+        new Tpm2bDigestKeyedhash());
+
+    // HMAC key (Advanced mode): a keyed-hash signing object holding externally-supplied key bytes
+    // (no SensitiveDataOrigin). Restricted is CLEAR so TPM2_HMAC may sign arbitrary data (the time
+    // counter); FixedTPM/FixedParent => the seed is non-duplicable and can never be read back out.
+    private static TpmPublic HmacTemplate(TpmAlgId hashAlg) => new(
+        TpmAlgId.Sha256,
+        ObjectAttr.Sign | ObjectAttr.UserWithAuth | ObjectAttr.FixedTPM | ObjectAttr.FixedParent,
+        Array.Empty<byte>(),
+        new KeyedhashParms(new SchemeHmac(hashAlg)),
         new Tpm2bDigestKeyedhash());
 
     private static TpmHandle CreateSrk(Tpm2 tpm) => tpm.CreatePrimary(
