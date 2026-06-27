@@ -59,10 +59,20 @@ public partial class MainWindow : Window
     private async Task ShowUpdateDialogAsync(UpdateInfo info)
     {
         if (Vm?.Update is null) return;
-        var dialog = new UpdateWindow(info, Vm.Update);
-        await dialog.ShowDialog(this);
-        // On "Ignore" the indicator stays (UpdateAvailable is already set); on "Update" the app is
-        // shutting down so the installer can swap files and relaunch — nothing more to do here.
+        // Guard the whole dialog flow: this runs from the startup task and from an async-void click
+        // handler, so an unhandled error here would silently break the popup or crash the app.
+        try
+        {
+            var dialog = new UpdateWindow(info, Vm.Update);
+            await dialog.ShowDialog(this);
+            // On "Ignore" the indicator stays (UpdateAvailable is already set); on "Update" the app is
+            // shutting down so the installer can swap files and relaunch — nothing more to do here.
+        }
+        catch (Exception ex)
+        {
+            await Dialogs.AlertAsync(this, "Update",
+                "Couldn't open the update window. You can download the latest version from the releases page.\n\n" + ex.Message);
+        }
     }
 
     protected override void OnClosed(EventArgs e)

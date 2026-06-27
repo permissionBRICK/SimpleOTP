@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Interactivity;
-using Avalonia.Markup.Xaml;
 using SimpleOtp.App.Services;
 using SimpleOtp.Core.Update;
 
@@ -46,8 +45,6 @@ public partial class UpdateWindow : Window
         if (_pageOnly)
             UpdateButton.Content = "Open download page";
     }
-
-    private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
     private void OnIgnore(object? sender, RoutedEventArgs e)
     {
