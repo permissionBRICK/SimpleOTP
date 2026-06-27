@@ -135,7 +135,7 @@ public sealed class VaultService : IDisposable
     /// as a non-exportable HMAC key (plus a recoverable export copy when a master password is set);
     /// in Simple mode it is AES-GCM encrypted under the DEK. Zeroes the supplied secret bytes after use.
     /// </summary>
-    public Account AddAccount(OtpAuthData data)
+    public Account AddAccount(OtpAuthData data, string? folderId = null)
     {
         EnsureUnlocked();
         var account = new Account
@@ -145,6 +145,8 @@ public sealed class VaultService : IDisposable
             Algorithm = data.Algorithm,
             Digits = data.Digits,
             Period = data.Period,
+            // Only honor a folder that actually exists; otherwise the account lands at the top level.
+            FolderId = folderId is not null && _file.Folders.Any(f => f.Id == folderId) ? folderId : null,
         };
         try
         {
@@ -173,6 +175,62 @@ public sealed class VaultService : IDisposable
         _file.Accounts.RemoveAll(a => a.Id == id);
         Save();
     }
+
+    // --- Folders --------------------------------------------------------------
+    // Folders are cleartext organizational metadata; they never touch the sealer, so these operations
+    // work whether the vault is locked or unlocked (the account secrets are untouched). The UI keeps
+    // codes flowing only for the open folder, so they double as a performance lever on big vaults.
+
+    /// <summary>The user's folders, in creation order.</summary>
+    public IReadOnlyList<Folder> Folders => _file.Folders;
+
+    /// <summary>Creates a folder with the given (trimmed) name and returns it.</summary>
+    public Folder AddFolder(string name)
+    {
+        var folder = new Folder { Name = (name ?? "").Trim() };
+        _file.Folders.Add(folder);
+        Save();
+        return folder;
+    }
+
+    /// <summary>Renames a folder. No-op if the id is unknown.</summary>
+    public void RenameFolder(string id, string name)
+    {
+        Folder? folder = _file.Folders.FirstOrDefault(f => f.Id == id);
+        if (folder is null) return;
+        folder.Name = (name ?? "").Trim();
+        Save();
+    }
+
+    /// <summary>
+    /// Deletes a folder. Accounts filed under it are NOT deleted — they fall back to the top level, so
+    /// a secret is never lost by removing a folder. No-op if the id is unknown.
+    /// </summary>
+    public void DeleteFolder(string id)
+    {
+        if (_file.Folders.RemoveAll(f => f.Id == id) == 0) return;
+        foreach (Account account in _file.Accounts)
+            if (account.FolderId == id)
+                account.FolderId = null;
+        Save();
+    }
+
+    /// <summary>
+    /// Moves an account into <paramref name="folderId"/> (null = top level). No-op if the account or a
+    /// non-null target folder is unknown.
+    /// </summary>
+    public void MoveAccount(string accountId, string? folderId)
+    {
+        if (folderId is not null && _file.Folders.All(f => f.Id != folderId)) return;
+        Account? account = _file.Accounts.FirstOrDefault(a => a.Id == accountId);
+        if (account is null || account.FolderId == folderId) return;
+        account.FolderId = folderId;
+        Save();
+    }
+
+    /// <summary>Accounts filed under <paramref name="folderId"/> (null = the top-level, uncategorized list).</summary>
+    public IReadOnlyList<Account> AccountsInFolder(string? folderId)
+        => _file.Accounts.Where(a => a.FolderId == folderId).ToList();
 
     /// <summary>
     /// Generates the current TOTP code for an account. In Advanced mode the HMAC is computed inside

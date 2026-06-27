@@ -20,6 +20,13 @@ public sealed class Account
     /// <summary>Account identifier within the issuer, e.g. "alice@example.com".</summary>
     public string Label { get; set; } = "";
 
+    /// <summary>
+    /// Id of the <see cref="Folder"/> this account is filed under, or null for the top-level
+    /// (uncategorized) list. Organizational only — it does not change how the secret is protected,
+    /// but the UI only generates codes for the open folder, so foldering keeps large vaults responsive.
+    /// </summary>
+    public string? FolderId { get; set; }
+
     public OtpAlgorithm Algorithm { get; set; } = OtpAlgorithm.Sha1;
 
     /// <summary>Number of digits in the generated code (commonly 6, sometimes 8).</summary>

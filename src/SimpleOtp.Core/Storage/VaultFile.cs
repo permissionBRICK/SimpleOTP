@@ -9,8 +9,9 @@ namespace SimpleOtp.Core.Storage;
 /// </summary>
 public sealed class VaultFile
 {
-    /// <summary>The schema version this build writes. v1 = Simple-only; v2 added Advanced Security.</summary>
-    public const int CurrentSchemaVersion = 2;
+    /// <summary>The schema version this build writes. v1 = Simple-only; v2 added Advanced Security;
+    /// v3 added folders (account grouping).</summary>
+    public const int CurrentSchemaVersion = 3;
 
     /// <summary>
     /// Schema version of this file, for forward migration. New files use
@@ -57,6 +58,13 @@ public sealed class VaultFile
     public byte[]? ExportPublicKey { get; set; }
 
     public List<Account> Accounts { get; set; } = [];
+
+    /// <summary>
+    /// User-defined folders for grouping accounts (see <see cref="Folder"/>). Empty by default, so a
+    /// vault with no folders renders exactly as before. An <see cref="Account.FolderId"/> references an
+    /// entry here; an account with no <c>FolderId</c> lives at the top level.
+    /// </summary>
+    public List<Folder> Folders { get; set; } = [];
 
     /// <summary>Advanced mode: true if a master password was set, so exporting secrets is possible.</summary>
     public bool ExportProtected => ExportPublicKey is not null;

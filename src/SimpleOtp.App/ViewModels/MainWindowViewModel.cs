@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -33,6 +35,12 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public ObservableCollection<AccountItemViewModel> Tokens { get; } = [];
 
+    /// <summary>Folder cards shown on the top-level list (empty inside a folder / when none exist).</summary>
+    public ObservableCollection<FolderItemViewModel> Folders { get; } = [];
+
+    /// <summary>Id of the folder currently open, or null at the top level. Drives which codes generate.</summary>
+    public string? CurrentFolderId { get; private set; }
+
     // Mutually-exclusive top-level states.
     [ObservableProperty] private bool _isReady;
     [ObservableProperty] private bool _isLocked;
@@ -51,9 +59,44 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _autoUnlockAvailable;
 
     [ObservableProperty] private string _errorMessage = "";
-    [ObservableProperty] private bool _hasAccounts;
     [ObservableProperty] private string _storePath = "";
     [ObservableProperty] private bool _pinSet;
+
+    // --- Folder navigation / list-scope flags ---------------------------------
+    // The ready view shows either the top level (folder cards + uncategorized accounts) or one open
+    // folder (its accounts). These flags are kept in sync by RefreshScopeFlags() so the XAML can bind
+    // simple booleans instead of expressions.
+
+    /// <summary>True while a folder is open (shows the back bar; hides the folder list).</summary>
+    [ObservableProperty] private bool _isInFolder;
+
+    /// <summary>Name of the open folder, shown in the back bar.</summary>
+    [ObservableProperty] private string _currentFolderName = "";
+
+    /// <summary>Ready AND at the top level — gates the "Add folder" button.</summary>
+    [ObservableProperty] private bool _isAtRoot;
+
+    /// <summary>Any folders exist (independent of which scope is open).</summary>
+    [ObservableProperty] private bool _hasFolders;
+
+    /// <summary>Folder cards are visible (top level AND at least one folder exists).</summary>
+    [ObservableProperty] private bool _showFolders;
+
+    /// <summary>The current scope lists something (folder cards or account cards) — shows the list.</summary>
+    [ObservableProperty] private bool _hasContent;
+
+    /// <summary>The vault has at least one account anywhere — gates the Export button.</summary>
+    [ObservableProperty] private bool _hasAnyAccounts;
+
+    /// <summary>Whole vault is empty (top level, no folders, no accounts) — shows the first-run placeholder.</summary>
+    [ObservableProperty] private bool _isEmptyState;
+
+    /// <summary>An open folder has no accounts — shows the "folder is empty" hint.</summary>
+    [ObservableProperty] private bool _isFolderEmpty;
+
+    // Keep the combined "ready and at the top level" flag current as either input changes.
+    partial void OnIsReadyChanged(bool value) => IsAtRoot = value && !IsInFolder;
+    partial void OnIsInFolderChanged(bool value) => IsAtRoot = IsReady && !value;
 
     // Unlock view.
     [ObservableProperty] private string _unlockPin = "";
@@ -83,7 +126,10 @@ public partial class MainWindowViewModel : ViewModelBase
         _timer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(100) };
         _timer.Tick += (_, _) => Tick();
         if (sealer is null)
-            IsReady = true; // design-time
+        {
+            IsReady = true;       // design-time
+            IsEmptyState = true;  // show the first-run placeholder in the previewer
+        }
     }
 
     /// <summary>Records a found update so the top-bar indicator appears and the popup can be reopened.</summary>
@@ -206,25 +252,116 @@ public partial class MainWindowViewModel : ViewModelBase
         _timer.Stop();
         StopGenerator(); // cancel in-flight generation before the vault key is zeroed
         Tokens.Clear();
-        HasAccounts = false;
+        Folders.Clear();
+        CurrentFolderId = null; // reopen at the top level after the next unlock
+        IsInFolder = false;
+        RefreshScopeFlags();
         Service.Lock();
         UnlockPin = "";
         SetState(locked: true);
     }
 
-    /// <summary>Rebuilds the token list from the (unlocked) vault and kicks off background generation.</summary>
+    /// <summary>
+    /// Rebuilds the folder cards and the current scope's account cards from the (unlocked) vault, and
+    /// kicks off background generation. Only the open scope's accounts become cards, so codes generate
+    /// for them alone — the TPM never has to keep the whole vault refreshed at once. Called on unlock,
+    /// on add/move/delete, and whenever the open folder changes.
+    /// </summary>
     public void ReloadTokens()
     {
         if (Service is null) return;
         bool wasRunning = _timer.IsEnabled;
         _timer.Stop();
-        StartGenerator(); // fresh work queue tied to the rebuilt card set
+        StartGenerator(); // fresh work queue tied to the rebuilt card set; cancels the old scope's work
+
+        // If the open folder was deleted out from under us, fall back to the top level.
+        if (CurrentFolderId is not null && Service.Folders.All(f => f.Id != CurrentFolderId))
+            CurrentFolderId = null;
+
+        // Account counts per folder, computed in one pass for the folder cards.
+        var counts = new Dictionary<string, int>();
+        foreach (Account account in Service.Accounts)
+            if (account.FolderId is { } fid)
+                counts[fid] = counts.GetValueOrDefault(fid) + 1;
+
+        Folders.Clear();
+        foreach (Folder folder in Service.Folders)
+            Folders.Add(new FolderItemViewModel(folder.Id, folder.Name, counts.GetValueOrDefault(folder.Id)));
+        HasFolders = Folders.Count > 0;
+
         Tokens.Clear();
-        foreach (var account in Service.Accounts)
+        foreach (Account account in Service.AccountsInFolder(CurrentFolderId))
             Tokens.Add(new AccountItemViewModel(account));
-        HasAccounts = Tokens.Count > 0;
+
+        Folder? current = CurrentFolderId is null ? null : Service.Folders.FirstOrDefault(f => f.Id == CurrentFolderId);
+        CurrentFolderName = current is null ? ""
+            : string.IsNullOrWhiteSpace(current.Name) ? "(unnamed folder)" : current.Name;
+        IsInFolder = CurrentFolderId is not null;
+
+        RefreshScopeFlags();
         Tick(); // queues the first round of generation; codes stream in as the worker finishes each
         if (wasRunning || IsReady) _timer.Start();
+    }
+
+    /// <summary>Recomputes the list-scope visibility flags from the current collections and open folder.</summary>
+    private void RefreshScopeFlags()
+    {
+        bool hasTokens = Tokens.Count > 0;
+        ShowFolders = !IsInFolder && HasFolders;
+        HasContent = hasTokens || ShowFolders;
+        HasAnyAccounts = (Service?.Accounts.Count ?? 0) > 0;
+        IsEmptyState = !IsInFolder && !HasFolders && !hasTokens;
+        IsFolderEmpty = IsInFolder && !hasTokens;
+    }
+
+    // --- Folder navigation + mutations ----------------------------------------
+
+    /// <summary>Opens a folder: its accounts become the only cards that generate codes.</summary>
+    public void OpenFolder(string folderId)
+    {
+        if (Service is null) return;
+        CurrentFolderId = folderId;
+        ReloadTokens();
+    }
+
+    /// <summary>Returns to the top level (folder cards + uncategorized accounts).</summary>
+    public void GoToRoot()
+    {
+        CurrentFolderId = null;
+        ReloadTokens();
+    }
+
+    /// <summary>Creates a folder (no-op on a blank name) and rebuilds the list.</summary>
+    public void AddFolder(string name)
+    {
+        if (Service is null || string.IsNullOrWhiteSpace(name)) return;
+        Service.AddFolder(name);
+        ReloadTokens();
+    }
+
+    /// <summary>Renames a folder (no-op on a blank name) and rebuilds the list.</summary>
+    public void RenameFolder(string folderId, string name)
+    {
+        if (Service is null || string.IsNullOrWhiteSpace(name)) return;
+        Service.RenameFolder(folderId, name);
+        ReloadTokens();
+    }
+
+    /// <summary>Deletes a folder; its accounts fall back to the top level (they are not removed).</summary>
+    public void DeleteFolder(string folderId)
+    {
+        if (Service is null) return;
+        if (CurrentFolderId == folderId) CurrentFolderId = null; // close it if it was open
+        Service.DeleteFolder(folderId);
+        ReloadTokens();
+    }
+
+    /// <summary>Moves an account into a folder (null = top level) and rebuilds the current scope.</summary>
+    public void MoveItemToFolder(AccountItemViewModel item, string? folderId)
+    {
+        if (Service is null) return;
+        Service.MoveAccount(item.Id, folderId);
+        ReloadTokens(); // the moved card usually leaves the current scope
     }
 
     public void DeleteItem(AccountItemViewModel item)
@@ -232,7 +369,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (Service is null) return;
         Service.RemoveAccount(item.Id);
         Tokens.Remove(item);
-        HasAccounts = Tokens.Count > 0;
+        RefreshScopeFlags();
     }
 
     public void NotifySettingsChanged()
