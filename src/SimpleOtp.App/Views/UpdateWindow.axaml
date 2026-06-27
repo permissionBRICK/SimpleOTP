@@ -36,11 +36,9 @@
             </StackPanel>
         </StackPanel>
 
-        <Border x:Name="NotesBox" Background="#16171A" CornerRadius="8" Padding="2" IsVisible="False">
-            <ScrollViewer MaxHeight="220">
-                <TextBox x:Name="NotesText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
-                         BorderThickness="0" Background="Transparent" Foreground="#C9CDD4" FontSize="12"
-                         Padding="10"/>
+        <Border x:Name="NotesBox" Background="#16171A" CornerRadius="8" Padding="12,10" IsVisible="False">
+            <ScrollViewer MaxHeight="240" HorizontalScrollBarVisibility="Disabled">
+                <ContentControl x:Name="NotesContent"/>
             </ScrollViewer>
         </Border>
 
