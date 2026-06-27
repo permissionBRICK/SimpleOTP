@@ -75,7 +75,7 @@
                             <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap"
                                        Text="Simple Security keeps each secret as device-bound ciphertext; it is briefly decrypted in memory to make a code, and can be exported freely."/>
                             <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"
-                                       Text="Advanced Security imports each secret into the TPM as a non-exportable key and computes the code inside the chip — the seed never leaves the device. Set a master password to keep an encrypted, recoverable copy so you can still export later; leave it blank to make the secrets permanently non-exportable."/>
+                                       Text="Advanced Security imports each secret into the TPM as a non-exportable key and computes the code inside the chip — the seed never leaves the device. Set a master password to keep an encrypted, recoverable copy so you can still export later; leave it blank to make the secrets permanently non-exportable. The downside is that the codes take longer to load when opening the app."/>
                             <TextBlock Classes="field" Text="Master password (optional)"/>
                             <TextBox PasswordChar="•" Text="{Binding MasterPassword}" PlaceholderText="Long passphrase, or leave blank"/>
                             <TextBox PasswordChar="•" Text="{Binding ConfirmMasterPassword}" PlaceholderText="Confirm master password" Margin="0,6,0,0"/>
