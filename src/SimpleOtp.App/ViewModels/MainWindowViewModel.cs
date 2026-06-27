@@ -5,9 +5,11 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SimpleOtp.App.Services;
 using SimpleOtp.Core;
 using SimpleOtp.Core.Crypto;
 using SimpleOtp.Core.Model;
+using SimpleOtp.Core.Update;
 
 namespace SimpleOtp.App.ViewModels;
 
@@ -61,16 +63,34 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _isToastVisible;
     [ObservableProperty] private string _toastText = "";
 
+    // Software update: drives the top-bar indicator. The actual check + popup are run by the view
+    // (it owns the window needed to host the dialog); see MainWindow.CheckForUpdatesAsync.
+    [ObservableProperty] private bool _updateAvailable;
+
+    /// <summary>The pending update (set once a check finds one), reused when the indicator is clicked.</summary>
+    public UpdateInfo? AvailableUpdate { get; private set; }
+
+    /// <summary>The update service, or null at design time / in tests.</summary>
+    public UpdateService? Update { get; }
+
     /// <summary>Design-time constructor (no TPM); shows the empty ready state in the previewer.</summary>
     public MainWindowViewModel() : this(null) { }
 
-    public MainWindowViewModel(ISecretSealer? sealer)
+    public MainWindowViewModel(ISecretSealer? sealer, UpdateService? update = null)
     {
         _sealer = sealer;
+        Update = update;
         _timer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(100) };
         _timer.Tick += (_, _) => Tick();
         if (sealer is null)
             IsReady = true; // design-time
+    }
+
+    /// <summary>Records a found update so the top-bar indicator appears and the popup can be reopened.</summary>
+    public void SetUpdateAvailable(UpdateInfo info)
+    {
+        AvailableUpdate = info;
+        UpdateAvailable = true;
     }
 
     public VaultService? Service { get; private set; }

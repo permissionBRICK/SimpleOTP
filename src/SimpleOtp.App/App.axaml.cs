@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using SimpleOtp.App.Services;
 using SimpleOtp.App.ViewModels;
 using SimpleOtp.App.Views;
 using SimpleOtp.Tpm;
@@ -21,8 +22,9 @@ public partial class App : Application
             desktop.MainWindow = new MainWindow
             {
                 // Inject the real TPM-backed sealer. The view model probes it on Bootstrap()
-                // and shows the "no TPM" screen if none is present.
-                DataContext = new MainWindowViewModel(new TpmSecretSealer()),
+                // and shows the "no TPM" screen if none is present. The UpdateService checks GitHub for
+                // a newer release once the window is shown.
+                DataContext = new MainWindowViewModel(new TpmSecretSealer(), new UpdateService()),
             };
         }
 

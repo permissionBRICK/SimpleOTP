@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using SimpleOtp.App.Services;
 using SimpleOtp.App.ViewModels;
 using SimpleOtp.Core;
 
@@ -9,10 +11,10 @@ public partial class SettingsWindow : Window
 {
     public SettingsWindow() : this(null) { }
 
-    public SettingsWindow(VaultService? service)
+    public SettingsWindow(VaultService? service, UpdateService? update = null)
     {
         InitializeComponent();
-        DataContext = new SettingsViewModel(service);
+        DataContext = new SettingsViewModel(service, update);
     }
 
     private SettingsViewModel? Vm => DataContext as SettingsViewModel;
@@ -45,4 +47,13 @@ public partial class SettingsWindow : Window
     }
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close(Changed);
+
+    // Open the GitHub releases page so the user can download an installer manually (the documented path
+    // when automatic update checks are turned off).
+    private void OnOpenReleases(object? sender, RoutedEventArgs e)
+    {
+        string url = $"https://github.com/{UpdateService.RepoOwner}/{UpdateService.RepoName}/releases";
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch { /* no browser available */ }
+    }
 }
