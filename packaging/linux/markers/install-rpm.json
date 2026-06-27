@@ -1,0 +1,6 @@
+{
+  "channel": "rpm",
+  "scope": "machine",
+  "autoUpdate": true,
+  "installDir": "/opt/simpleotp"
+}

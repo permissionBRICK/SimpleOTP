@@ -1,0 +1,6 @@
+{
+  "channel": "deb",
+  "scope": "machine",
+  "autoUpdate": true,
+  "installDir": "/opt/simpleotp"
+}

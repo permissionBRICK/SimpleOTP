@@ -4,6 +4,10 @@ obj/
 *.user
 artifacts/
 
+## Packaging staging / output
+publish/
+dist/
+
 ## Rider / VS
 .idea/
 .vs/
