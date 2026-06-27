@@ -1,218 +1,230 @@
 # SimpleOTP
 
-A cross-platform (Windows-first) desktop authenticator for **TOTP** two-factor codes, written in
-.NET 10 + Avalonia. It looks and works like a mobile authenticator — a list of accounts, each
-showing the current 6/8‑digit code with a live countdown ring, and **click a code to copy it**.
+A Windows-first desktop authenticator for TOTP codes, built with .NET 10 and Avalonia.
 
-The twist: every secret is **encrypted with a key sealed to your machine's TPM 2.0 chip**. Copying
-the config file to another computer is useless — the secrets can only be decrypted on the device
-that sealed them.
+SimpleOTP gives you the familiar authenticator app flow - accounts, live countdowns, click-to-copy
+codes - with a TPM-backed security model. The headline feature is **Advanced Security mode**:
+
+2FA codes are stored and calculated entirely inside the TPM. This means that unlike with conventional tools like Bitwarden, an attacker could only ever extract the current 2FA code, but never any future codes without continued access to the device.
 
 ![main window](docs/screenshot-main.png)
 
-## Why the TPM matters
+## Highlights
 
-This project was inspired by [`mtausig/totpm`](https://gitlab.com/mtausig/totpm) (a Go CLI that
-imports TOTP seeds into the TPM). SimpleOTP keeps that device-binding idea and improves on it:
+- **Snipping Tool-first QR import** - click **Snip...**, capture the QR, and import automatically.
+- **Advanced Security mode** - the cryptographic showcase: non-exportable TPM-backed OTP secrets.
+- **Simple Security mode** - fast TPM-sealed vault encryption with the same PIN and auto-unlock
+  options.
+- **Google Authenticator migration** - import/export bulk `otpauth-migration://` QR codes, including
+  multi-QR exports.
+- **Desktop-native authenticator UX** - live countdown rings, click-to-copy codes, lock/unlock, and
+  quick account management.
+- **Device-bound by default** - copying `vault.json` to another computer does not make the secrets
+  usable there.
+- **No insecure fallback** - if a TPM 2.0 device is not available, the app refuses to store secrets.
 
-| | `totpm` (reference) | **SimpleOTP** |
+## Security Modes
+
+Choose the mode in **Settings -> Security mode**.
+
+| Mode | Best for | What you get |
 |---|---|---|
-| Secret protection | Seed imported into TPM as an HMAC key | **Two modes** — Simple (seed AES‑256‑GCM under a TPM‑sealed key) or Advanced (seed imported into the TPM as a non‑exportable HMAC key, HMAC computed in‑chip) |
-| PIN / auth | **None** — any local process as your user can mint codes | **Optional, TPM‑enforced PIN** (Simple); optional master password for export (Advanced) |
-| Algorithms | SHA1 only (URI field ignored) | SHA1 / SHA256 / SHA512 honored |
-| Interface | CLI | GUI (Avalonia), like a phone authenticator |
-| Persistent TPM state | Transient (re-derives SRK each run) | Transient — **never writes to TPM NV storage** |
+| **Advanced Security** | Maximum seed isolation | Non-exportable TPM-held OTP secrets, TPM HMAC generation, optional PIN, optional auto-unlock, optional export recovery |
+| **Simple Security** | Fast everyday use | AES-256-GCM encrypted vault under a TPM-sealed key, optional PIN, optional auto-unlock, free export |
 
-### How device-binding works
-
-1. On first run, SimpleOTP generates a random **256‑bit data‑encryption key (DEK)**.
-2. The DEK is **sealed** as a TPM keyed‑hash object under a Storage Root Key (SRK) that is
-   re‑derived deterministically from the TPM's (per‑chip, non‑extractable) owner seed each run.
-   The sealed public/private blobs are stored in the vault file — **nothing is left inside the TPM**.
-3. Each account's TOTP secret is encrypted with **AES‑256‑GCM** under the DEK.
-4. To show codes, the TPM **unseals** the DEK (optionally gated by your PIN). Only the *exact* TPM
-   that sealed it can do this — so a copied `vault.json` is inert on any other machine.
-
-> ⚠️ **There is no cloud backup and no escrow — by design.** If the TPM is cleared/reset, the
-> firmware is updated in a way that resets the TPM, or the machine/motherboard changes, the sealed
-> key is gone and **your stored secrets are unrecoverable**. Keep your original QR codes / recovery
-> codes so you can re‑enroll. This is the price of true device binding.
-
-The PIN, when set, is the TPM object's auth value. Wrong PINs feed the TPM's dictionary‑attack
-lockout, so brute force is throttled by hardware. There is **no PIN recovery**.
-
-### Security modes: Simple vs Advanced
-
-Switch any time under **⚙ Settings → Security mode**:
-
-- **Simple Security** (default) — the model above: each seed is AES‑256‑GCM ciphertext under a
-  TPM‑sealed DEK. The seed is briefly in memory to compute a code, and accounts export freely.
-  Supports the optional PIN and network auto-unlock.
-- **Advanced Security** — each seed is imported into the TPM as a **non‑exportable HMAC key**
-  (`FixedTPM` / `FixedParent`), and the TOTP HMAC is computed **inside the chip** — only the
-  6/8‑digit code ever leaves the TPM, never the seed. This is `totpm`'s model, taken further: the key
-  is genuinely non‑duplicable. Generating codes and adding accounts need no PIN or password.
-
-  Exporting is the deliberate trade-off. Set a **master password** when switching to Advanced and the
-  app keeps an encrypted, recoverable copy of each seed (ECIES: encrypting needs only a public key, so
-  adding accounts never prompts — the private key is TPM‑sealed under your password and recovered only
-  when you export). Skip the password and the seeds are **permanently non‑exportable** — keep your
-  original QR codes. You can convert back to Simple only if a password was set. This mode is much more secure since a compromised host can only extract current OTP codes, but not the seed, meaning the OTP is safe again once breach is resolved. The downside is that loading the keys on app start takes a bit longer if you have many of them, since they have to be calculated in the TPM one by one, and are limited by the TPM crypto processor in speed.
-
-  > Some firmware TPMs support SHA‑1/SHA‑256 keyed‑hash keys but not SHA‑512. A SHA‑512 account can't
-  > be hosted in Advanced mode on such a chip; it stays in Simple mode with a clear message.
+Advanced mode is the star of the project. Simple mode is the practical default for users who want
+TPM device binding plus simpler export workflows.
 
 ![advanced security](docs/screenshot-advanced.png)
 
-### Network auto-unlock (optional)
-
-Inspired by **BitLocker Network Unlock** (minus the certificate machinery): instead of typing your
-PIN every session, the app can fetch an unlock secret from a webservice on your machine/LAN and use
-it to open the vault automatically.
-
-How it stays safe with a PIN:
-
-- The vault key (DEK) is **sealed twice** in the TPM — once under your **PIN**, once under a separate
-  **high-entropy auto-unlock key**. Either can unlock; the webservice never learns your PIN.
-- The auto-unlock key is **never stored on disk** by this app. Only the second sealed blob and the
-  endpoint config live in `vault.json`. The key lives only in your webservice (e.g. in its RAM).
-- On launch, if auto-unlock is configured, the app calls your service; on success it unseals via the
-  TPM with no prompt. **On any failure it falls back to the PIN screen.**
-
-You build the webservice (the app is the client only). The contract:
-
-| | |
-|---|---|
-| Request | `POST {url}` (GET also supported) with header `X-App-Key: {appKey}` |
-| Success | `200 OK`, response **body = the auto-unlock key** (UTF-8 text; trailing whitespace trimmed) |
-| Failure | any non-2xx / unreachable → app falls back to PIN |
-
-Configure it under **⚙ Settings → Network auto-unlock**: set the URL and app key, generate the
-auto-unlock key, click **Enable** (the app shows the exact body your service must return), and use
-**Test** to verify your endpoint. For an `https://` URL with a self-signed/local certificate, you can
-pin it by SHA-256 thumbprint (or, for local dev only, allow any cert).
-
-![settings](docs/screenshot-settings.png)
-
-> The device-binding guarantee is unchanged: the auto-unlock blob is still TPM-sealed, so a copied
-> `vault.json` plus the app key are useless on another machine (no matching TPM). The added exposure
-> is local: while your service is reachable, anything that can call it **and** read the app key from
-> `vault.json` could obtain the unlock key — so run the service on loopback/your LAN and prefer
-> `https` off-box.
-
 ## Requirements
 
-- **.NET 10 SDK** (the app targets `net10.0`).
-- A working **TPM 2.0** (Windows: via TBS; Linux: `/dev/tpmrm0`). The app **hard‑requires** a TPM —
-  with none present it shows a "No TPM detected" screen and refuses to store anything insecurely.
+- **.NET 10 SDK**
+- **TPM 2.0**
+  - Windows: TBS
+  - Linux: `/dev/tpmrm0`
 
-## Build & run
+## Build & Run
 
 ```bash
-dotnet build                       # build the whole solution
-dotnet test                        # run unit tests (TPM integration tests are skipped by default)
+dotnet build
+dotnet test
 dotnet run --project src/SimpleOtp.App
 ```
 
-### Publish a self-contained Windows executable
+Publish a self-contained Windows executable:
 
 ```bash
 dotnet publish src/SimpleOtp.App -r win-x64 -c Release --self-contained \
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 ```
 
-Linux build: swap `-r win-x64` for `-r linux-x64`. (Do **not** add `PublishTrimmed` — Avalonia's
-XAML/view-locator uses reflection and breaks under aggressive trimming.)
+For Linux, swap `-r win-x64` for `-r linux-x64`.
 
-## Using it
+Do not use `PublishTrimmed`; Avalonia view location relies on reflection.
 
-- **+** in the header (or the empty-state button) opens **Add account**, which supports:
-  - **Paste** an `otpauth://totp/...` link **or** a raw Base32 secret, then *Load*.
-  - **Import a QR screenshot**: *Open image…*, *Paste image* (e.g. after `Win`+`Shift`+`S`), or
-    **drag an image file** onto the window.
-  - **Google Authenticator bulk export**: import an `otpauth-migration://` export QR (Authenticator →
-    *Transfer accounts* → *Export*) to add **many accounts at once**. The dialog lists every TOTP
-    account found with checkboxes so you can pick which to import (HOTP entries are skipped). If the
-    export spans **multiple QR codes**, open or drag **all of them** (or open several at once) — the
-    parts are combined and de-duplicated, and the dialog shows how many of the N parts you've loaded.
-  - **Manual entry**: issuer, label, secret, algorithm, digits, period.
-- **📤 Export** generates a Google-Authenticator-format migration QR from all your accounts —
-  splitting into **multiple QR codes** automatically when there are too many for one — so you can
-  move them to another authenticator (or back into SimpleOTP). You can page through the QR(s) and
-  **save them as PNGs**. (The migration format always uses a 30-second period and 6/8-digit codes.)
-- **Click a card** to copy its current code (a "Copied" toast confirms).
-- **⚙ Settings** to set / change / remove the TPM‑enforced PIN, and to configure **network
-  auto-unlock** (see above).
-- **🔒 Lock** to clear the unlocked key from memory until the PIN is re-entered.
+## Import Accounts
+
+Open **Add account** with the **+** button.
+
+- **Snip a QR**: click **Snip...**, capture the QR with Windows Snipping Tool, and let SimpleOTP
+  import it from the clipboard.
+- **Paste a QR screenshot**: capture with `Win` + `Shift` + `S`, then use **Paste image**.
+- **Open or drop a QR image**: use **Open image...**, paste from the clipboard, or drag an image
+  file onto the window.
+- **Import Google Authenticator bulk exports**: load one or more `otpauth-migration://` QR codes and
+  choose which TOTP accounts to add.
+- **Paste account text**: use an `otpauth://totp/...` URI or raw Base32 secret.
+- **Enter manually**: issuer, label, secret, algorithm, digits, and period.
 
 ![bulk import](docs/screenshot-bulk.png)
+
+## Everyday Use
+
+- Click a code card to copy the current OTP.
+- Use **Export** to generate Google Authenticator-compatible migration QR codes.
+- Use **Settings** to change security mode, configure a PIN, or set up network auto-unlock.
+- Use **Lock** to clear unlocked key material from memory until the vault is opened again.
+
 ![export](docs/screenshot-export.png)
 
-By default there is **no PIN** — secrets are bound to the device + your OS account. Enable a PIN for
-an extra factor.
+## Security Details
 
-## Data & storage
+### Why The TPM Matters
 
-Vault file (mode `0600`):
+SimpleOTP was inspired by [`mtausig/totpm`](https://gitlab.com/mtausig/totpm), a Go CLI that imports
+TOTP seeds into a TPM. SimpleOTP keeps that device-binding idea and adds a desktop UI, modern import
+and export flows, multiple algorithms, and two security modes.
+
+| | `totpm` | **SimpleOTP** |
+|---|---|---|
+| Secret protection | Seed imported into TPM as an HMAC key | Advanced TPM HMAC keys or Simple TPM-sealed vault encryption |
+| Local auth | None | Optional TPM PIN and network auto-unlock; optional export password in Advanced mode |
+| Algorithms | SHA1 only | SHA1, SHA256, SHA512 |
+| Interface | CLI | Avalonia desktop app |
+| TPM persistence | Transient | Transient; no TPM NV storage |
+
+### Simple Security Details
+
+Simple mode stores each OTP seed as AES-256-GCM ciphertext under a random data-encryption key. That
+key is sealed by the TPM and can optionally require a PIN.
+
+On launch, the TPM unseals the vault key only on the machine that created it. With a PIN enabled,
+wrong attempts feed the TPM dictionary-attack lockout, so brute force is throttled by hardware.
+There is no PIN recovery.
+
+### Advanced Security Details
+
+Advanced mode imports each seed into the TPM as a non-exportable keyed-hash object with `FixedTPM`
+and `FixedParent`. TOTP HMAC calculation happens in the chip, so routine code generation does not
+need the seed to leave the TPM.
+
+PIN and network auto-unlock still work in Advanced mode. They gate the vault key that authorizes the
+per-account TPM HMAC keys.
+
+Export is the deliberate trade-off:
+
+- Set a **master password** to keep an encrypted recovery copy for exports and conversion back to
+  Simple mode.
+- Skip the password to make imported seeds permanently non-exportable. Keep your original QR codes
+  and recovery codes.
+
+Some firmware TPMs support SHA1/SHA256 keyed-hash keys but not SHA512. SHA512 accounts stay in
+Simple mode on those chips and the app shows a clear message.
+
+Advanced vaults may take longer to open or refresh when they contain many accounts because each code
+generation path uses the TPM.
+
+### Device-Binding Caveat
+
+There is no cloud backup or escrow. If the TPM is cleared, reset, or replaced, TPM-bound secrets are
+not recoverable from the vault file alone. Keep recovery codes for every account.
+
+## Network Auto-Unlock
+
+Both security modes can unlock from a local or LAN service instead of asking for your PIN every session. The
+feature is inspired by BitLocker Network Unlock, but SimpleOTP is only the client.
+
+Configure it in **Settings -> Network auto-unlock**.
+
+| | |
+|---|---|
+| Request | `POST {url}` or `GET {url}` with `X-App-Key: {appKey}` |
+| Success | `200 OK` with the auto-unlock key as the UTF-8 response body |
+| Failure | Any non-2xx response, invalid response, or unreachable service falls back to PIN unlock |
+
+The auto-unlock key is not stored by SimpleOTP. The vault stores only endpoint settings and a second
+TPM-sealed blob. A copied vault plus app key still cannot unlock on another machine without the
+matching TPM.
+
+![settings](docs/screenshot-settings.png)
+
+## Data & Storage
+
+Vault file permissions are restricted to the current user.
 
 - Windows: `%AppData%\SimpleOtp\vault.json`
 - Linux/macOS: `~/.config/SimpleOtp/vault.json`
 
+Simple mode account shape:
+
 ```jsonc
 {
-  "Version": 1,
+  "Version": 2,
   "Backend": "tpm2",
+  "Mode": "Simple",
   "PinProtected": false,
   "Dek": { "Public": "<base64 TPM2B public>", "Private": "<base64 TPM2B private>" },
-  // present only when network auto-unlock is enabled (the second sealing + endpoint config;
-  // the auto-unlock key itself is NOT stored here):
-  "DekAuto": { "Public": "…", "Private": "…" },
-  "AutoUnlock": { "Enabled": true, "Url": "https://…/unlock", "AppKey": "…", "Method": "POST" },
+  "DekAuto": { "Public": "...", "Private": "..." },
+  "AutoUnlock": { "Enabled": true, "Url": "https://.../unlock", "AppKey": "...", "Method": "POST" },
   "Accounts": [
     {
-      "Id": "…", "Issuer": "GitHub", "Label": "octocat",
-      "Algorithm": "Sha1", "Digits": 6, "Period": 30,
-      "Secret": { "Nonce": "…", "Tag": "…", "Ciphertext": "…" }   // AES-256-GCM, never plaintext
+      "Id": "...",
+      "Issuer": "GitHub",
+      "Label": "octocat",
+      "Algorithm": "Sha1",
+      "Digits": 6,
+      "Period": 30,
+      "Secret": { "Nonce": "...", "Tag": "...", "Ciphertext": "..." }
     }
   ]
 }
 ```
 
-## Project layout
+Advanced mode adds TPM object blobs for non-exportable account keys and, only when enabled, encrypted
+export recovery material.
 
-```
+## Project Layout
+
+```text
 SimpleOtp.slnx
-├── src/
-│   ├── SimpleOtp.Core/     TOTP engine, otpauth parser, envelope-encryption Vault, store,
-│   │                       network auto-unlock client  (no TPM/UI deps)
-│   ├── SimpleOtp.Tpm/      ISecretSealer implementation over TPM 2.0 (Microsoft.TSS)
-│   ├── SimpleOtp.Import/   QR decoding (ZXing.Net + SkiaSharp)
-│   └── SimpleOtp.App/      Avalonia 12 GUI (MVVM, CommunityToolkit.Mvvm)
-└── tests/
-    └── SimpleOtp.Tests/    xUnit: RFC 6238 vectors, URI parsing, vault round-trips, QR, view models
+|-- src/
+|   |-- SimpleOtp.Core/     TOTP engine, otpauth parser, vault, store, auto-unlock client
+|   |-- SimpleOtp.Tpm/      TPM 2.0 sealer implementation over Microsoft.TSS
+|   |-- SimpleOtp.Import/   QR decoding and encoding
+|   `-- SimpleOtp.App/      Avalonia 12 GUI
+`-- tests/
+    `-- SimpleOtp.Tests/    xUnit tests for TOTP, parsing, vaults, QR, security modes, view models
 ```
 
-The TPM lives behind the `ISecretSealer` interface in Core, so everything except `SimpleOtp.Tpm`
-is hardware-agnostic and unit-testable with an in-memory fake.
+The TPM implementation sits behind `ISecretSealer`, so the core logic stays unit-testable with an
+in-memory fake.
 
-### Running the real-TPM tests
+## Real-TPM Tests
 
-These are skipped by default so the suite never touches the chip. To run them (each seals **one
-transient object** and flushes it — nothing persists in the TPM):
+TPM integration tests are skipped by default.
 
 ```bash
 SIMPLEOTP_TPM_TEST=1 dotnet test --filter FullyQualifiedName~TpmIntegrationTests
 ```
 
-One test deliberately fails an auth to prove the PIN is enforced, which advances the TPM's
-dictionary-attack counter. On a shared chip with a low `MaxAuthFail` that can eventually trip
-lockout, so it is gated behind a **second** opt-in and stays skipped above:
+The dictionary-attack test deliberately fails one auth attempt, so it needs a second opt-in:
 
 ```bash
 SIMPLEOTP_TPM_TEST=1 SIMPLEOTP_TPM_DA_TEST=1 dotnet test --filter FullyQualifiedName~TpmIntegrationTests
 ```
 
-## Key dependencies
+## Key Dependencies
 
-`Microsoft.TSS` (TPM 2.0) · `Otp.NET` (RFC 6238) · `ZXing.Net` + `ZXing.Net.Bindings.SkiaSharp`
-(QR) · `Avalonia` 12 + `CommunityToolkit.Mvvm` (UI).
+`Microsoft.TSS` for TPM 2.0, `Otp.NET` for RFC 6238, `ZXing.Net` and SkiaSharp for QR handling,
+Avalonia 12 and CommunityToolkit.Mvvm for the desktop app.
