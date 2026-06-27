@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Interactivity;
+using SimpleOtp.App.Markdown;
 using SimpleOtp.App.Services;
 using SimpleOtp.Core.Update;
 
@@ -37,7 +38,8 @@ public partial class UpdateWindow : Window
         string notes = (info.ReleaseNotes ?? "").Trim();
         if (notes.Length > 0)
         {
-            NotesText.Text = notes;
+            // GitHub release bodies are markdown; render them formatted rather than as raw text.
+            NotesContent.Content = MarkdownRenderer.Build(notes);
             NotesBox.IsVisible = true;
         }
 
@@ -121,7 +123,7 @@ public partial class UpdateWindow : Window
         UpdateAvailable = true,
         CurrentVersion = new ReleaseVersion(1, 0, 0),
         LatestVersion = new ReleaseVersion(1, 1, 0),
-        ReleaseNotes = "• Example release notes",
+        ReleaseNotes = "## Downloads\n\n- **Installer:** Windows [x64](https://example/setup.exe)\n- **Portable:** Windows [x64](https://example/portable.zip)\n\n## Changes since v1.0.0\n\n- Add folders to organize accounts (`abc1234`)\n- Fix update popup crash (`def5678`)",
         Asset = new ReleaseAsset("SimpleOTP-1.1.0-linux-x64.tar.gz", "https://example/asset", 1),
     };
 }
