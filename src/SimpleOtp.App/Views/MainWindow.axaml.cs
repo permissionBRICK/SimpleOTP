@@ -30,6 +30,20 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
+    // Hovering a card bumps its code to the front of the background generation queue, so a code you're
+    // looking at appears first even when many accounts are still loading. Released when the pointer leaves.
+    private void OnCardPointerEntered(object? sender, PointerEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is AccountItemViewModel item)
+            Vm?.PrioritizeItem(item);
+    }
+
+    private void OnCardPointerExited(object? sender, PointerEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is AccountItemViewModel item)
+            Vm?.ReleasePriority(item);
+    }
+
     private async void OnCardClick(object? sender, RoutedEventArgs e)
     {
         if ((sender as Control)?.DataContext is not AccountItemViewModel item || Vm is null)

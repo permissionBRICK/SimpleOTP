@@ -124,7 +124,9 @@
                         <ItemsControl ItemsSource="{Binding Tokens}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:AccountItemViewModel">
-                                    <Button Classes="card" Click="OnCardClick">
+                                    <Button Classes="card" Click="OnCardClick"
+                                            PointerEntered="OnCardPointerEntered"
+                                            PointerExited="OnCardPointerExited">
                                         <Grid ColumnDefinitions="*,Auto,Auto">
                                             <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
                                                 <TextBlock Text="{Binding Title}" FontSize="14"

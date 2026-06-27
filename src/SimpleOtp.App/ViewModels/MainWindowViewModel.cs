@@ -1,7 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -24,9 +23,10 @@ public partial class MainWindowViewModel : ViewModelBase
 
     // Background code generation. Codes are expensive (a TPM round-trip each in Advanced mode), so they
     // are never computed on the UI thread. The timer enqueues per-card work here; a single worker drains
-    // it one code at a time and posts each result back to the card. Recreated per unlocked session so a
-    // lock/reload cancels any in-flight work before the vault key is zeroed.
-    private Channel<GenRequest>? _genChannel;
+    // it one code at a time and posts each result back to the card. The queue lets the hovered card jump
+    // ahead. Recreated per unlocked session so a lock/reload cancels any in-flight work before the vault
+    // key is zeroed.
+    private GenQueue? _genQueue;
     private CancellationTokenSource? _genCts;
 
     public ObservableCollection<AccountItemViewModel> Tokens { get; } = [];
@@ -249,19 +249,33 @@ public partial class MainWindowViewModel : ViewModelBase
         foreach (var token in Tokens)
             token.Refresh(now);
 
-        var writer = _genChannel?.Writer;
-        if (writer is null) return;
+        var queue = _genQueue;
+        if (queue is null) return;
 
         // Hand the worker what's missing. Visible codes first so the list fills in, then next-cycle
         // codes so they're cached before the rollover. Each card only claims a counter once (until it's
         // delivered), so re-ticking 10x/second doesn't pile up duplicate work.
         foreach (var token in Tokens)
             if (token.ClaimCurrentWork(now) is long counter)
-                writer.TryWrite(new GenRequest(token, counter));
+                queue.Enqueue(new GenRequest(token, counter));
         foreach (var token in Tokens)
             if (token.ClaimPrefetchWork(now) is long counter)
-                writer.TryWrite(new GenRequest(token, counter));
+                queue.Enqueue(new GenRequest(token, counter));
     }
+
+    /// <summary>
+    /// Bumps a card's not-yet-loaded code to the front of the generation queue — called when the pointer
+    /// hovers it, so the code you're looking at appears first even behind a long backlog. No-op once the
+    /// card's current code is already shown.
+    /// </summary>
+    public void PrioritizeItem(AccountItemViewModel item)
+    {
+        if (item.IsStale)
+            _genQueue?.SetUrgent(item);
+    }
+
+    /// <summary>Drops the hover priority when the pointer leaves the card.</summary>
+    public void ReleasePriority(AccountItemViewModel item) => _genQueue?.ClearUrgent(item);
 
     /// <summary>Stops the timer and background worker. Call when the window closes.</summary>
     public void Shutdown()
@@ -272,24 +286,21 @@ public partial class MainWindowViewModel : ViewModelBase
 
     // --- Background code generation -------------------------------------------
 
-    private readonly record struct GenRequest(AccountItemViewModel Item, long Counter);
-
     private void StartGenerator()
     {
         StopGenerator();
         var cts = new CancellationTokenSource();
-        var channel = Channel.CreateUnbounded<GenRequest>(new UnboundedChannelOptions { SingleReader = true });
+        var queue = new GenQueue();
         _genCts = cts;
-        _genChannel = channel;
-        _ = Task.Run(() => RunGeneratorAsync(channel.Reader, cts.Token));
+        _genQueue = queue;
+        _ = Task.Run(() => RunGeneratorAsync(queue, cts.Token));
     }
 
     private void StopGenerator()
     {
         _genCts?.Cancel();
-        _genChannel?.Writer.TryComplete();
         _genCts = null;
-        _genChannel = null;
+        _genQueue = null;
     }
 
     /// <summary>
@@ -297,12 +308,13 @@ public partial class MainWindowViewModel : ViewModelBase
     /// dislikes concurrent access), posting each finished code back to its card. Generation failures
     /// (e.g. a lock landing mid-flight) surface as an empty code rather than crashing the worker.
     /// </summary>
-    private async Task RunGeneratorAsync(ChannelReader<GenRequest> reader, CancellationToken ct)
+    private async Task RunGeneratorAsync(GenQueue queue, CancellationToken ct)
     {
         try
         {
-            await foreach (GenRequest req in reader.ReadAllAsync(ct).ConfigureAwait(false))
+            while (true)
             {
+                GenRequest req = await queue.DequeueAsync(ct).ConfigureAwait(false);
                 AccountItemViewModel item = req.Item;
                 long counter = req.Counter;
                 string raw;
