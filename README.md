@@ -258,6 +258,12 @@ Versions are `MAJOR.MINOR.PATCH`:
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds and tests pull requests and feature branches.
 
+**Optional VirusTotal scan.** Set a `VIRUSTOTAL_API_KEY` repository secret and the release job submits the
+Windows installers and portable zips to VirusTotal and links the scan reports in the release notes. It is
+skipped when the secret is absent and never fails the release. This is for transparency and early
+false-positive detection — it does **not** remove antivirus false positives (code signing plus per-vendor
+false-positive reports do that).
+
 ## Project Layout
 
 ```text
