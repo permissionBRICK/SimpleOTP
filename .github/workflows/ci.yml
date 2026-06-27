@@ -1,0 +1,24 @@
+name: ci
+
+# Build + test on PRs and on pushes to any branch except master (master is covered by release.yml,
+# which has its own test gate).
+on:
+  pull_request:
+  push:
+    branches-ignore: [master]
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      # TPM integration tests are gated behind SIMPLEOTP_TPM_TEST and skip automatically here.
+      - name: Build and test
+        run: dotnet test -c Release --nologo
