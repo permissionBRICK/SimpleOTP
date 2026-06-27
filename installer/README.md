@@ -26,9 +26,10 @@ identifier). CI installs the current release via `choco install innosetup`. On a
 dotnet publish src/SimpleOtp.App -c Release -r win-x64 --no-self-contained `
   -p:Version=1.0.3 -p:PublishReadyToRun=true -o publish/win-x64
 
-# 2. Compile the installer:
+# 2. Compile the installer (SourceDir must be absolute or relative to the installer\ folder,
+#    since Inno resolves a relative Source against the .iss directory — note the ..\ below):
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\SimpleOTP.iss `
-    /DMyAppVersion=1.0.3 /DMyAppArch=win-x64 /DSourceDir=publish\win-x64 /Odist
+    /DMyAppVersion=1.0.3 /DMyAppArch=win-x64 "/DSourceDir=$PWD\publish\win-x64" /Odist
 ```
 
 Output: `dist\SimpleOTP-Setup-1.0.3-win-x64.exe`. Use `/DMyAppArch=win-arm64` (and the matching

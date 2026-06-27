@@ -82,10 +82,12 @@ jobs:
       - name: Build installer
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
+          # Inno resolves a relative Source against the .iss directory (installer\), so pass an absolute
+          # SourceDir pointing at the publish output at the repo root.
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\SimpleOTP.iss `
             /DMyAppVersion=${{ needs.version.outputs.version }} `
             /DMyAppArch=${{ matrix.rid }} `
-            /DSourceDir=publish\fdd `
+            "/DSourceDir=${{ github.workspace }}\publish\fdd" `
             /Odist
 
       - name: Publish (self-contained, for the portable zip)
