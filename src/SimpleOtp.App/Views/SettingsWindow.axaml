@@ -108,6 +108,22 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Software updates -->
+                <Border Classes="card">
+                    <StackPanel Spacing="2">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Classes="h" Text="Software updates"/>
+                            <TextBlock Grid.Column="1" Text="{Binding CurrentVersionText}" Foreground="#6F757F"
+                                       FontSize="11" VerticalAlignment="Center"/>
+                        </Grid>
+                        <CheckBox Content="Automatically check for updates on startup" IsChecked="{Binding AutoUpdateEnabled}"
+                                  Foreground="#C9CDD4" Margin="0,4,0,0"/>
+                        <TextBlock Foreground="#8A8F99" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"
+                                   Text="When on, SimpleOTP checks GitHub on launch and offers a one-click update. When off, no check runs — update from the releases page yourself."/>
+                        <Button Content="Open releases page" Margin="0,10,0,0" Click="OnOpenReleases"/>
+                    </StackPanel>
+                </Border>
+
                 <!-- PIN (gates the vault key in both modes) -->
                 <Border Classes="card">
                     <StackPanel Spacing="2">

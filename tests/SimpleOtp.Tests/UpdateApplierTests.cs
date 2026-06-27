@@ -76,9 +76,10 @@ public class UpdateApplierTests : IDisposable
     private static void WriteExecutable(string path, string content)
     {
         File.WriteAllText(path, content);
-        File.SetUnixFileMode(path,
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-            UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        if (!OperatingSystem.IsWindows()) // the test only runs on Linux; guard satisfies the platform analyzer
+            File.SetUnixFileMode(path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
     }
 }

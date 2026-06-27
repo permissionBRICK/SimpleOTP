@@ -1,0 +1,60 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="420" d:DesignHeight="360"
+        x:Class="SimpleOtp.App.Views.UpdateWindow"
+        Width="420"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        RequestedThemeVariant="Dark"
+        Background="#1E2024"
+        Title="Update available">
+
+    <Window.Styles>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="#3D7DEB"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="16,9"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="MinWidth" Value="120"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#4F8BF5"/>
+        </Style>
+    </Window.Styles>
+
+    <StackPanel Margin="22" Spacing="14">
+        <StackPanel Orientation="Horizontal" Spacing="10">
+            <TextBlock Text="🚀" FontSize="26" VerticalAlignment="Center"/>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="HeadingText" FontSize="17" FontWeight="SemiBold" Foreground="#F2F3F5"/>
+                <TextBlock x:Name="SubText" FontSize="12" Foreground="#8A8F99"/>
+            </StackPanel>
+        </StackPanel>
+
+        <Border x:Name="NotesBox" Background="#16171A" CornerRadius="8" Padding="2" IsVisible="False">
+            <ScrollViewer MaxHeight="220">
+                <TextBox x:Name="NotesText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                         BorderThickness="0" Background="Transparent" Foreground="#C9CDD4" FontSize="12"
+                         Padding="10"/>
+            </ScrollViewer>
+        </Border>
+
+        <StackPanel x:Name="ProgressPanel" IsVisible="False" Spacing="6">
+            <ProgressBar x:Name="ProgressBarCtl" Minimum="0" Maximum="100" IsIndeterminate="True" Height="6"/>
+            <TextBlock x:Name="StatusText" FontSize="12" Foreground="#8A8F99"/>
+        </StackPanel>
+
+        <TextBlock x:Name="ErrorText" Foreground="#F2685C" FontSize="12" TextWrapping="Wrap" IsVisible="False"/>
+
+        <StackPanel x:Name="ButtonsPanel" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+            <Button x:Name="IgnoreButton" Content="Ignore" MinWidth="92" HorizontalContentAlignment="Center"
+                    Click="OnIgnore"/>
+            <Button x:Name="UpdateButton" Classes="primary" Content="Update now" Click="OnUpdate"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

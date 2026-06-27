@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -8,6 +9,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using SimpleOtp.App.ViewModels;
 using SimpleOtp.Core.Totp;
+using SimpleOtp.Core.Update;
 
 namespace SimpleOtp.App.Views;
 
@@ -25,7 +27,42 @@ public partial class MainWindow : Window
         base.OnOpened(e);
         if (Vm is not null)
             Vm.PropertyChanged += OnVmPropertyChanged;
-        _ = Vm?.BootstrapAsync();
+        _ = StartupAsync();
+    }
+
+    // Open the vault, then (once the window is up) check GitHub for a newer release. The update check
+    // runs regardless of vault state — even the no-TPM / locked screens should be able to offer it.
+    private async Task StartupAsync()
+    {
+        if (Vm is null) return;
+        await Vm.BootstrapAsync();
+        await CheckForUpdatesAsync();
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        if (Vm?.Update is null) return;
+        UpdateInfo? info = await Vm.Update.CheckAsync();
+        if (info is null) return;        // up to date, dev build, disabled, or a check failure
+        Vm.SetUpdateAvailable(info);     // show the top-bar indicator
+        if (Vm.Update.ShouldPrompt(info.LatestVersion))
+            await ShowUpdateDialogAsync(info);
+    }
+
+    // The top-bar indicator: reopen the update popup for the already-found update.
+    private async void OnUpdateClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm?.AvailableUpdate is { } info)
+            await ShowUpdateDialogAsync(info);
+    }
+
+    private async Task ShowUpdateDialogAsync(UpdateInfo info)
+    {
+        if (Vm?.Update is null) return;
+        var dialog = new UpdateWindow(info, Vm.Update);
+        await dialog.ShowDialog(this);
+        // On "Ignore" the indicator stays (UpdateAvailable is already set); on "Update" the app is
+        // shutting down so the installer can swap files and relaunch — nothing more to do here.
     }
 
     protected override void OnClosed(EventArgs e)
@@ -166,7 +203,7 @@ public partial class MainWindow : Window
     {
         if (Vm?.Service is null)
             return;
-        var dialog = new SettingsWindow(Vm.Service);
+        var dialog = new SettingsWindow(Vm.Service, Vm.Update);
         await dialog.ShowDialog<bool>(this);
         Vm.NotifySettingsChanged();
     }

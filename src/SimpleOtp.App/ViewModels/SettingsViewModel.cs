@@ -4,17 +4,21 @@ using System.Text;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SimpleOtp.App.Services;
 using SimpleOtp.Core;
 using SimpleOtp.Core.AutoUnlock;
 using SimpleOtp.Core.Crypto;
 using SimpleOtp.Core.Model;
+using SimpleOtp.Core.Update;
 
 namespace SimpleOtp.App.ViewModels;
 
-/// <summary>Backs the Settings window: PIN management and network auto-unlock configuration.</summary>
+/// <summary>Backs the Settings window: PIN management, network auto-unlock, and software updates.</summary>
 public partial class SettingsViewModel : ViewModelBase
 {
     private readonly VaultService? _service;
+    private readonly UpdateService? _updateService;
+    private readonly bool _updatesLoaded;
 
     // Security mode
     [ObservableProperty] private bool _isAdvanced;
@@ -45,9 +49,21 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string _contract = "";
     [ObservableProperty] private bool _showContract;
 
+    // Software updates
+    [ObservableProperty] private bool _autoUpdateEnabled = true;
+    [ObservableProperty] private string _currentVersionText = "";
+
     /// <summary>Short badge for the current mode.</summary>
     public string ModeBadge => IsAdvanced ? "ADVANCED" : "SIMPLE";
     partial void OnIsAdvancedChanged(bool value) => OnPropertyChanged(nameof(ModeBadge));
+
+    // Persist the auto-update choice immediately when toggled (but not during construction).
+    partial void OnAutoUpdateEnabledChanged(bool value)
+    {
+        if (!_updatesLoaded || _updateService is null) return;
+        _updateService.SetAutoUpdate(value);
+        Changed = true;
+    }
 
     public string[] Methods { get; } = ["POST", "GET"];
 
@@ -56,9 +72,18 @@ public partial class SettingsViewModel : ViewModelBase
 
     public SettingsViewModel() : this(null) { }
 
-    public SettingsViewModel(VaultService? service)
+    public SettingsViewModel(VaultService? service, UpdateService? updateService = null)
     {
         _service = service;
+        _updateService = updateService;
+        if (updateService is not null)
+        {
+            AutoUpdateEnabled = updateService.AutoUpdateEnabled;
+            ReleaseVersion v = updateService.CurrentAppVersion;
+            CurrentVersionText = v.IsZero ? "Development build" : $"Version {v}";
+        }
+        _updatesLoaded = true; // guard so the initial assignment above doesn't persist a no-op change
+
         if (service is not null)
         {
             IsAdvanced = service.Mode == SecurityMode.Advanced;

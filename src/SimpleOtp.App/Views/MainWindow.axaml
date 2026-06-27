@@ -98,7 +98,7 @@
         <DockPanel>
             <!-- Header -->
             <Border DockPanel.Dock="Top" Padding="16,12" Background="#1B1D21">
-                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto,Auto">
                     <TextBlock Grid.Column="0" Text="SimpleOTP" FontSize="18" FontWeight="Bold"
                                Foreground="#F2F3F5" VerticalAlignment="Center"/>
                     <Border Grid.Column="1" IsVisible="{Binding IsAdvancedMode}" Background="#243042"
@@ -106,13 +106,18 @@
                             ToolTip.Tip="Secrets are non-exportable and HMAC is computed inside the TPM">
                         <TextBlock Text="ADVANCED" Foreground="#6AA9FF" FontSize="10" FontWeight="Bold"/>
                     </Border>
-                    <Button Grid.Column="3" Classes="icon" Content="📤" ToolTip.Tip="Export accounts"
+                    <!-- Update indicator: appears when a newer release was found (e.g. after the user chose
+                         "Ignore"). Click to reopen the update popup. -->
+                    <Button Grid.Column="3" Classes="icon" Content="⬆" Foreground="#7BD88F"
+                            ToolTip.Tip="Update available — click to update"
+                            IsVisible="{Binding UpdateAvailable}" Click="OnUpdateClick"/>
+                    <Button Grid.Column="4" Classes="icon" Content="📤" ToolTip.Tip="Export accounts"
                             IsVisible="{Binding HasAccounts}" Click="OnExportClick"/>
-                    <Button Grid.Column="4" Classes="icon" Content="🔒" ToolTip.Tip="Lock"
+                    <Button Grid.Column="5" Classes="icon" Content="🔒" ToolTip.Tip="Lock"
                             IsVisible="{Binding CanLock}" Click="OnLockClick"/>
-                    <Button Grid.Column="5" Classes="icon" Content="⚙" ToolTip.Tip="Settings"
+                    <Button Grid.Column="6" Classes="icon" Content="⚙" ToolTip.Tip="Settings"
                             IsVisible="{Binding IsReady}" Click="OnSettingsClick"/>
-                    <Button Grid.Column="6" Classes="icon" Content="+" FontSize="24" FontWeight="Bold"
+                    <Button Grid.Column="7" Classes="icon" Content="+" FontSize="24" FontWeight="Bold"
                             ToolTip.Tip="Add account" IsVisible="{Binding IsReady}" Click="OnAddClick"/>
                 </Grid>
             </Border>
