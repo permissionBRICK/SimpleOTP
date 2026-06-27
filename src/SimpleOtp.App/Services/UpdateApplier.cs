@@ -10,10 +10,11 @@ namespace SimpleOtp.App.Services;
 /// external helper (the silent installer, or a small swap/relaunch script) that waits for THIS process
 /// to exit before replacing files — so the caller must shut the app down immediately after this returns.
 ///
-/// Cross-channel contract for the relaunch:
-///  - Windows / Inno:   the installer's [Run] entry relaunches SimpleOtp.exe after a silent re-install.
-///  - all other paths:  a generated script waits for our PID, swaps files (elevating if needed), and
-///                      relaunches the app itself.
+/// Every path waits for THIS process to exit before touching files (a running instance makes a silent
+/// Inno install abort via AppMutex and locks the files it must replace).
+/// Relaunch:
+///  - Windows / Inno:   the installer's [Run] entry relaunches SimpleOtp.exe after the silent re-install.
+///  - all other paths:  the generated script relaunches the app itself.
 /// </summary>
 internal static class UpdateApplier
 {
@@ -34,29 +35,26 @@ internal static class UpdateApplier
         bool isZip = file.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
         if (install.Channel == InstallChannel.Portable || isZip)
         {
-            LaunchWindowsPortable(install, file);
+            // Portable: wait for exit, expand the zip over the install dir, relaunch.
+            string exe = Path.Combine(install.InstallDir, "SimpleOtp.exe");
+            RunPowerShell(WriteTempScript("simpleotp-portable.ps1", WindowsPortableScript),
+                "-ProcId", Environment.ProcessId.ToString(), "-Zip", file, "-Dest", install.InstallDir, "-Exe", exe);
             return;
         }
 
-        // Inno Setup installer. Re-run it silently over the existing install; the installer's AppMutex
-        // makes it wait for this app to exit, then its [Run] entry relaunches us. UsePreviousPrivileges
-        // / UsePreviousAppDir in the .iss reuse the original scope and directory, so no /DIR or
-        // /ALLUSERS is needed here — we only elevate when the original install was machine-wide.
-        var psi = new ProcessStartInfo
-        {
-            FileName = file,
-            Arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART",
-            UseShellExecute = true,
-        };
-        if (install.RequiresElevation)
-            psi.Verb = "runas"; // UAC prompt so the silent installer can write to Program Files
-        Process.Start(psi);
+        // Inno Setup installer. A helper waits for this app to FULLY exit, then runs the installer
+        // silently — otherwise the still-running instance makes /VERYSILENT abort (AppMutex) and locks
+        // the files being replaced. The installer's [Run] entry relaunches us. UsePreviousPrivileges /
+        // UsePreviousAppDir in the .iss reuse the original scope and directory; we only elevate when the
+        // original install was machine-wide.
+        RunPowerShell(WriteTempScript("simpleotp-installer.ps1", WindowsInstallerScript),
+            "-ProcId", Environment.ProcessId.ToString(),
+            "-Installer", file,
+            "-Elevate", install.RequiresElevation ? "1" : "0");
     }
 
-    private static void LaunchWindowsPortable(InstallInfo install, string zipFile)
+    private static void RunPowerShell(string script, params string[] args)
     {
-        string exe = Path.Combine(install.InstallDir, "SimpleOtp.exe");
-        string script = WriteTempScript("simpleotp-update.ps1", WindowsPortableScript);
         var psi = new ProcessStartInfo
         {
             FileName = "powershell.exe",
@@ -68,10 +66,7 @@ internal static class UpdateApplier
         psi.ArgumentList.Add("Bypass");
         psi.ArgumentList.Add("-File");
         psi.ArgumentList.Add(script);
-        psi.ArgumentList.Add("-ProcId"); psi.ArgumentList.Add(Environment.ProcessId.ToString());
-        psi.ArgumentList.Add("-Zip"); psi.ArgumentList.Add(zipFile);
-        psi.ArgumentList.Add("-Dest"); psi.ArgumentList.Add(install.InstallDir);
-        psi.ArgumentList.Add("-Exe"); psi.ArgumentList.Add(exe);
+        foreach (string a in args) psi.ArgumentList.Add(a);
         Process.Start(psi);
     }
 
@@ -115,6 +110,24 @@ internal static class UpdateApplier
         File.WriteAllText(path, content.ReplaceLineEndings(OperatingSystem.IsWindows() ? "\r\n" : "\n"));
         return path;
     }
+
+    // PowerShell: wait for the app to exit, then run the Inno installer silently (elevating for a
+    // machine-wide install). The installer's [Run] entry relaunches the app.
+    private const string WindowsInstallerScript = """
+        param(
+            [int]$ProcId,
+            [string]$Installer,
+            [string]$Elevate
+        )
+        try { Wait-Process -Id $ProcId -Timeout 120 } catch { }
+        Start-Sleep -Milliseconds 500
+        $flags = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART')
+        if ($Elevate -eq '1') {
+            Start-Process -FilePath $Installer -ArgumentList $flags -Verb RunAs
+        } else {
+            Start-Process -FilePath $Installer -ArgumentList $flags
+        }
+        """;
 
     // PowerShell: wait for the app to exit, unpack the portable zip over the install dir, relaunch.
     private const string WindowsPortableScript = """
