@@ -1,0 +1,183 @@
+name: release
+
+# Build and auto-release on every push to master. The version is MAJOR.MINOR (from version.json) plus
+# an auto-incrementing PATCH computed from the existing tags, so bumping major/minor in version.json
+# resets patch to 0. Creating the tag/release with the default GITHUB_TOKEN does not re-trigger this
+# workflow, and a tag push never matches the branches filter — so there is no release loop.
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---- 1. Compute the version once, share it with every build job ----
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.calc.outputs.version }}
+      tag: ${{ steps.calc.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history + tags so "git tag -l" works
+      - id: calc
+        run: |
+          set -euo pipefail
+          MAJOR=$(jq -r '.major' version.json)
+          MINOR=$(jq -r '.minor' version.json)
+          git fetch --tags --force --quiet || true
+          # PATCH = number of existing v<major>.<minor>.* tags -> resets to 0 when major/minor change.
+          PATCH=$(git tag -l "v${MAJOR}.${MINOR}.*" | wc -l | tr -d ' ')
+          VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          TAG="v${VERSION}"
+          # Re-run safety: if the computed tag already exists, bump past it.
+          while git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; do
+            PATCH=$((PATCH + 1)); VERSION="${MAJOR}.${MINOR}.${PATCH}"; TAG="v${VERSION}"
+          done
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved ${TAG}"
+
+  # ---- 2. Test gate (master only; PRs/branches use ci.yml) ----
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet test -c Release --nologo
+
+  # ---- 3. Windows: Inno Setup installer (framework-dependent) + self-contained portable zip ----
+  windows:
+    needs: [version, test]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish (framework-dependent)
+        run: >
+          dotnet publish src/SimpleOtp.App -c Release -r ${{ matrix.rid }} --no-self-contained
+          -p:Version=${{ needs.version.outputs.version }} -p:PublishReadyToRun=true -o publish/fdd
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\SimpleOTP.iss `
+            /DMyAppVersion=${{ needs.version.outputs.version }} `
+            /DMyAppArch=${{ matrix.rid }} `
+            /DSourceDir=publish\fdd `
+            /Odist
+
+      - name: Publish (self-contained, for the portable zip)
+        run: >
+          dotnet publish src/SimpleOtp.App -c Release -r ${{ matrix.rid }} --self-contained
+          -p:Version=${{ needs.version.outputs.version }} -p:PublishReadyToRun=true -o publish/portable
+
+      - name: Package portable zip
+        run: |
+          Copy-Item packaging/windows/install-portable.json publish/portable/simpleotp.install.json
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path publish/portable/* -DestinationPath "dist/SimpleOTP-${{ needs.version.outputs.version }}-${{ matrix.rid }}-portable.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.rid }}
+          path: dist/*
+          if-no-files-found: error
+
+  # ---- 4. Linux: tar.gz (+ install scripts) and nfpm .deb / .rpm (framework-dependent) ----
+  linux:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [linux-x64, linux-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish (framework-dependent)
+        run: >
+          dotnet publish src/SimpleOtp.App -c Release -r ${{ matrix.rid }} --no-self-contained
+          -p:Version=${{ needs.version.outputs.version }} -p:PublishReadyToRun=true -o publish
+
+      - name: Install nfpm
+        run: |
+          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_x86_64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Build .deb and .rpm
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          ARCH: ${{ matrix.rid == 'linux-arm64' && 'arm64' || 'amd64' }}
+        run: |
+          mkdir -p dist
+          nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/
+          nfpm package -f packaging/linux/nfpm.yaml -p rpm -t dist/
+
+      - name: Build tar.gz
+        run: |
+          stage="$(mktemp -d)"
+          mkdir -p "$stage/SimpleOTP/app"
+          cp -a publish/. "$stage/SimpleOTP/app/"
+          cp packaging/linux/install.sh packaging/linux/uninstall.sh "$stage/SimpleOTP/"
+          cp src/SimpleOtp.App/Assets/simpleotp.png "$stage/SimpleOTP/"
+          chmod +x "$stage/SimpleOTP/install.sh" "$stage/SimpleOTP/uninstall.sh"
+          mkdir -p dist
+          tar -czf "dist/SimpleOTP-${{ needs.version.outputs.version }}-${{ matrix.rid }}.tar.gz" -C "$stage" SimpleOTP
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.rid }}
+          path: dist/*
+          if-no-files-found: error
+
+  # ---- 5. Collect every artifact and publish the GitHub release ----
+  release:
+    needs: [version, windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: pkg-*
+          merge-multiple: true
+      - run: ls -R dist
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
