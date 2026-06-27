@@ -130,28 +130,43 @@ begin
   end;
 end;
 
-{ True if Microsoft.NETCore.App >= MinVersion is installed for this arch (read from the 64-bit registry
-  view so a 32-bit setup process still sees the x64/arm64 keys). }
-function RuntimeInstalled(const MinVersion: String): Boolean;
+{ True if any entry in Names is a .NET 10.x version (10.0.0 <= v < 11.0.0). }
+function ListHasNetCore10(const Names: TArrayOfString): Boolean;
 var
-  Key: String;
-  Names: TArrayOfString;
   I: Integer;
 begin
   Result := False;
+  for I := 0 to GetArrayLength(Names) - 1 do
+    if (CompareVersion(Names[I], '10.0.0') >= 0) and (CompareVersion(Names[I], '11.0.0') < 0) then
+    begin
+      Result := True;
+      Exit;
+    end;
+end;
+
+{ True if the .NET 10 base runtime for this arch is recorded under the given registry view. The .NET
+  installer writes these keys to the 32-bit (WOW6432Node) view regardless of architecture, so HKLM32 is
+  the one that matters on 64-bit Windows (the previous HKLM64 lookup always missed and reinstalled every
+  run); HKLM64 is also checked for safety. The versions appear as value names (and, on some builds, as
+  subkeys), so both are checked. }
+function HasRuntimeInView(RootKey: Integer): Boolean;
+var
+  Key: String;
+  Names: TArrayOfString;
+begin
   Key := 'SOFTWARE\dotnet\Setup\InstalledVersions\{#DotnetArch}\sharedfx\Microsoft.NETCore.App';
-  if RegGetValueNames(HKLM64, Key, Names) then
-    for I := 0 to GetArrayLength(Names) - 1 do
-      if CompareVersion(Names[I], MinVersion) >= 0 then
-      begin
-        Result := True;
-        Exit;
-      end;
+  Result := (RegGetValueNames(RootKey, Key, Names) and ListHasNetCore10(Names))
+         or (RegGetSubkeyNames(RootKey, Key, Names) and ListHasNetCore10(Names));
+end;
+
+function RuntimeInstalled(): Boolean;
+begin
+  Result := HasRuntimeInView(HKLM32) or HasRuntimeInView(HKLM64);
 end;
 
 function InitializeSetup(): Boolean;
 begin
-  NeedRuntime := not RuntimeInstalled('10.0.0');
+  NeedRuntime := not RuntimeInstalled();
   RuntimeUrl := 'https://aka.ms/dotnet/10.0/dotnet-runtime-win-{#DotnetArch}.exe';
   RuntimeFile := ExpandConstant('{tmp}\dotnet-runtime.exe');
   Result := True;
