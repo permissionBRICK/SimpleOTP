@@ -24,6 +24,12 @@ public partial class MainWindow : Window
         _ = Vm?.BootstrapAsync();
     }
 
+    protected override void OnClosed(EventArgs e)
+    {
+        Vm?.Shutdown(); // stop the timer + background generation worker
+        base.OnClosed(e);
+    }
+
     private async void OnCardClick(object? sender, RoutedEventArgs e)
     {
         if ((sender as Control)?.DataContext is not AccountItemViewModel item || Vm is null)

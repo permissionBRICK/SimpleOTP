@@ -62,6 +62,11 @@
         <Style Selector="TextBlock.code.expiring">
             <Setter Property="Foreground" Value="#F2A33C"/>
         </Style>
+        <!-- Code whose window has lapsed but whose refreshed value hasn't arrived yet: greyed out. -->
+        <Style Selector="TextBlock.code.stale">
+            <Setter Property="Foreground" Value="#565A62"/>
+            <Setter Property="Opacity" Value="0.65"/>
+        </Style>
 
         <Style Selector="Button.primary">
             <Setter Property="Background" Value="#3D7DEB"/>
@@ -130,7 +135,8 @@
                                                            IsVisible="{Binding Subtitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                                            TextTrimming="CharacterEllipsis"/>
                                                 <TextBlock Text="{Binding Code}" Classes="code"
-                                                           Classes.expiring="{Binding IsExpiring}" Margin="0,4,0,0"/>
+                                                           Classes.expiring="{Binding IsExpiring}"
+                                                           Classes.stale="{Binding IsStale}" Margin="0,4,0,0"/>
                                             </StackPanel>
 
                                             <!-- Ring countdown -->
