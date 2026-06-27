@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -20,6 +21,13 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly ISecretSealer? _sealer;
     private readonly DispatcherTimer _timer;
     private int _toastToken;
+
+    // Background code generation. Codes are expensive (a TPM round-trip each in Advanced mode), so they
+    // are never computed on the UI thread. The timer enqueues per-card work here; a single worker drains
+    // it one code at a time and posts each result back to the card. Recreated per unlocked session so a
+    // lock/reload cancels any in-flight work before the vault key is zeroed.
+    private Channel<GenRequest>? _genChannel;
+    private CancellationTokenSource? _genCts;
 
     public ObservableCollection<AccountItemViewModel> Tokens { get; } = [];
 
@@ -176,6 +184,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (Service is null || !IsReady) return;
         _timer.Stop();
+        StopGenerator(); // cancel in-flight generation before the vault key is zeroed
         Tokens.Clear();
         HasAccounts = false;
         Service.Lock();
@@ -183,17 +192,18 @@ public partial class MainWindowViewModel : ViewModelBase
         SetState(locked: true);
     }
 
-    /// <summary>Rebuilds the token list from the (unlocked) vault and refreshes immediately.</summary>
+    /// <summary>Rebuilds the token list from the (unlocked) vault and kicks off background generation.</summary>
     public void ReloadTokens()
     {
         if (Service is null) return;
         bool wasRunning = _timer.IsEnabled;
         _timer.Stop();
+        StartGenerator(); // fresh work queue tied to the rebuilt card set
         Tokens.Clear();
         foreach (var account in Service.Accounts)
-            Tokens.Add(new AccountItemViewModel(account, Service));
+            Tokens.Add(new AccountItemViewModel(account));
         HasAccounts = Tokens.Count > 0;
-        Tick();
+        Tick(); // queues the first round of generation; codes stream in as the worker finishes each
         if (wasRunning || IsReady) _timer.Start();
     }
 
@@ -235,9 +245,95 @@ public partial class MainWindowViewModel : ViewModelBase
     private void Tick()
     {
         var now = DateTime.UtcNow;
+        // Cheap, every tick: countdown + promote any code we already pre-generated for this window.
         foreach (var token in Tokens)
             token.Refresh(now);
+
+        var writer = _genChannel?.Writer;
+        if (writer is null) return;
+
+        // Hand the worker what's missing. Visible codes first so the list fills in, then next-cycle
+        // codes so they're cached before the rollover. Each card only claims a counter once (until it's
+        // delivered), so re-ticking 10x/second doesn't pile up duplicate work.
+        foreach (var token in Tokens)
+            if (token.ClaimCurrentWork(now) is long counter)
+                writer.TryWrite(new GenRequest(token, counter));
+        foreach (var token in Tokens)
+            if (token.ClaimPrefetchWork(now) is long counter)
+                writer.TryWrite(new GenRequest(token, counter));
     }
+
+    /// <summary>Stops the timer and background worker. Call when the window closes.</summary>
+    public void Shutdown()
+    {
+        _timer.Stop();
+        StopGenerator();
+    }
+
+    // --- Background code generation -------------------------------------------
+
+    private readonly record struct GenRequest(AccountItemViewModel Item, long Counter);
+
+    private void StartGenerator()
+    {
+        StopGenerator();
+        var cts = new CancellationTokenSource();
+        var channel = Channel.CreateUnbounded<GenRequest>(new UnboundedChannelOptions { SingleReader = true });
+        _genCts = cts;
+        _genChannel = channel;
+        _ = Task.Run(() => RunGeneratorAsync(channel.Reader, cts.Token));
+    }
+
+    private void StopGenerator()
+    {
+        _genCts?.Cancel();
+        _genChannel?.Writer.TryComplete();
+        _genCts = null;
+        _genChannel = null;
+    }
+
+    /// <summary>
+    /// Drains the work queue one code at a time off the UI thread (also serializing the TPM, which
+    /// dislikes concurrent access), posting each finished code back to its card. Generation failures
+    /// (e.g. a lock landing mid-flight) surface as an empty code rather than crashing the worker.
+    /// </summary>
+    private async Task RunGeneratorAsync(ChannelReader<GenRequest> reader, CancellationToken ct)
+    {
+        try
+        {
+            await foreach (GenRequest req in reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                AccountItemViewModel item = req.Item;
+                long counter = req.Counter;
+                string raw;
+                try
+                {
+                    raw = Service!.GenerateCode(item.Account, TimeForCounter(counter, item.Period));
+                }
+                catch
+                {
+                    raw = "";
+                }
+
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (!ct.IsCancellationRequested)
+                        item.Deliver(counter, raw, DateTime.UtcNow);
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Session ended (lock / reload / shutdown); nothing to clean up.
+        }
+    }
+
+    /// <summary>
+    /// A UTC instant inside the given counter's window. <see cref="VaultService.GenerateCode"/> re-derives
+    /// the same counter from it, identically for Simple and Advanced modes.
+    /// </summary>
+    private static DateTime TimeForCounter(long counter, int period)
+        => DateTime.UnixEpoch.AddSeconds((double)counter * period);
 
     private void SetState(bool ready = false, bool locked = false, bool noTpm = false, bool error = false, bool connecting = false, bool loading = false)
     {
