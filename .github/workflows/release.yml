@@ -162,6 +162,9 @@ jobs:
   release:
     needs: [version, windows, linux]
     runs-on: ubuntu-latest
+    # Mapped here so steps can gate on whether the optional VirusTotal key is configured.
+    env:
+      VT_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
     steps:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
@@ -183,3 +186,39 @@ jobs:
             dist/*.tar.gz
             dist/*.deb
             dist/*.rpm
+
+      # Optional: submit the Windows installers + portable zips to VirusTotal so there's a public scan
+      # report to link from the release (and early warning of any false positives). Runs only when the
+      # VIRUSTOTAL_API_KEY secret is set, and never fails the release (the release is already published).
+      # Note: this does NOT remove AV false positives — code signing + per-vendor FP reports do that.
+      - name: Scan installers and portable zips on VirusTotal
+        id: vt
+        if: env.VT_KEY != ''
+        continue-on-error: true
+        uses: crazy-max/ghaction-virustotal@v5
+        with:
+          vt_api_key: ${{ env.VT_KEY }}
+          request_rate: 4   # required for the free public API key
+          files: |
+            dist/*.exe
+            dist/*.zip
+
+      - name: Append VirusTotal links to the release notes
+        if: env.VT_KEY != '' && steps.vt.outputs.analysis != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}   # this job has no checkout, so gh needs the repo explicitly
+          TAG: ${{ needs.version.outputs.tag }}
+          ANALYSIS: ${{ steps.vt.outputs.analysis }}
+        run: |
+          set -euo pipefail
+          current=$(gh release view "$TAG" --json body -q .body)
+          bt='`'  # markdown code-span backtick, via a var so it isn't read as a shell expansion
+          {
+            printf '%s\n\n### VirusTotal scans\n' "$current"
+            # ANALYSIS is "file=url,file=url,..." — one bullet per file.
+            echo "$ANALYSIS" | tr ',' '\n' | while IFS='=' read -r name url; do
+              [ -n "$url" ] && printf -- '- [%s%s%s](%s)\n' "$bt" "$(basename "$name")" "$bt" "$url"
+            done
+          } | gh release edit "$TAG" --notes-file -
