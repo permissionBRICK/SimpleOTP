@@ -1,6 +1,6 @@
 # SimpleOTP
 
-A Windows-first desktop authenticator for TOTP codes, built with .NET 10 and Avalonia.
+A secure, multi-platform desktop authenticator vault for 2FA codes, built with .NET 10 and Avalonia.
 
 SimpleOTP gives you the familiar authenticator app flow - accounts, live countdowns, click-to-copy
 codes - with a TPM-backed security model. The headline feature is **Advanced Security mode**:
