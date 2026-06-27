@@ -364,6 +364,24 @@ public partial class MainWindowViewModel : ViewModelBase
         ReloadTokens(); // the moved card usually leaves the current scope
     }
 
+    /// <summary>Moves a card one step up within the open scope. Reorders in place so codes aren't regenerated.</summary>
+    public void MoveItemUp(AccountItemViewModel item)
+    {
+        if (Service is null) return;
+        int i = Tokens.IndexOf(item);
+        if (i > 0 && Service.MoveAccountUp(item.Id))
+            Tokens.Move(i, i - 1);
+    }
+
+    /// <summary>Moves a card one step down within the open scope. Reorders in place so codes aren't regenerated.</summary>
+    public void MoveItemDown(AccountItemViewModel item)
+    {
+        if (Service is null) return;
+        int i = Tokens.IndexOf(item);
+        if (i >= 0 && i < Tokens.Count - 1 && Service.MoveAccountDown(item.Id))
+            Tokens.Move(i, i + 1);
+    }
+
     public void DeleteItem(AccountItemViewModel item)
     {
         if (Service is null) return;

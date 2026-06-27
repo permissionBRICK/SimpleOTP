@@ -133,7 +133,32 @@ public partial class MainWindow : Window
         e.Handled = true;
         if (sender is not Control control) return;
         _menuTarget = control.DataContext as AccountItemViewModel; // the button lives in the card's tree
+
+        // Grey out Move up/down at the ends of the current scope. Done on the flyout's items directly so
+        // it doesn't depend on DataContext reaching the popup.
+        if (_menuTarget is not null && Vm is not null
+            && FlyoutBase.GetAttachedFlyout(control) is MenuFlyout menu)
+        {
+            int index = Vm.Tokens.IndexOf(_menuTarget);
+            int count = Vm.Tokens.Count;
+            foreach (MenuItem item in menu.Items.OfType<MenuItem>())
+            {
+                if (item.Tag as string == "up") item.IsEnabled = index > 0;
+                else if (item.Tag as string == "down") item.IsEnabled = index >= 0 && index < count - 1;
+            }
+        }
+
         FlyoutBase.ShowAttachedFlyout(control);
+    }
+
+    private void OnMoveUpClick(object? sender, RoutedEventArgs e)
+    {
+        if (_menuTarget is { } item) Vm?.MoveItemUp(item);
+    }
+
+    private void OnMoveDownClick(object? sender, RoutedEventArgs e)
+    {
+        if (_menuTarget is { } item) Vm?.MoveItemDown(item);
     }
 
     private async void OnDeleteClick(object? sender, RoutedEventArgs e)

@@ -233,6 +233,34 @@ public sealed class VaultService : IDisposable
         => _file.Accounts.Where(a => a.FolderId == folderId).ToList();
 
     /// <summary>
+    /// Moves an account one step earlier within its own folder scope, swapping it with the nearest
+    /// preceding account that shares its <see cref="Account.FolderId"/>. Accounts in other folders keep
+    /// their positions. Returns false if the account is unknown or already first in its scope.
+    /// </summary>
+    public bool MoveAccountUp(string accountId) => ReorderAccount(accountId, -1);
+
+    /// <summary>Moves an account one step later within its own folder scope (see <see cref="MoveAccountUp"/>).</summary>
+    public bool MoveAccountDown(string accountId) => ReorderAccount(accountId, +1);
+
+    private bool ReorderAccount(string accountId, int direction)
+    {
+        int index = _file.Accounts.FindIndex(a => a.Id == accountId);
+        if (index < 0) return false;
+        string? folderId = _file.Accounts[index].FolderId;
+
+        // The same-scope neighbour may not be physically adjacent (other folders' accounts can sit
+        // between them in the flat list), so scan in the requested direction for the nearest match.
+        int swap = -1;
+        for (int j = index + direction; j >= 0 && j < _file.Accounts.Count; j += direction)
+            if (_file.Accounts[j].FolderId == folderId) { swap = j; break; }
+        if (swap < 0) return false; // already at the edge of its scope
+
+        (_file.Accounts[index], _file.Accounts[swap]) = (_file.Accounts[swap], _file.Accounts[index]);
+        Save();
+        return true;
+    }
+
+    /// <summary>
     /// Generates the current TOTP code for an account. In Advanced mode the HMAC is computed inside
     /// the TPM (the seed never leaves the chip); in Simple mode the secret is decrypted transiently
     /// and zeroed immediately afterward.
