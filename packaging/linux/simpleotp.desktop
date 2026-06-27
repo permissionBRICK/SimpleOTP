@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SimpleOTP
+GenericName=Authenticator
+Comment=TPM-backed TOTP authenticator
+Exec=simpleotp
+Icon=simpleotp
+Terminal=false
+Categories=Utility;Security;
+Keywords=otp;totp;2fa;authenticator;tpm;
+StartupWMClass=SimpleOtp
