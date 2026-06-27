@@ -57,7 +57,7 @@ Switch any time under **⚙ Settings → Security mode**:
   app keeps an encrypted, recoverable copy of each seed (ECIES: encrypting needs only a public key, so
   adding accounts never prompts — the private key is TPM‑sealed under your password and recovered only
   when you export). Skip the password and the seeds are **permanently non‑exportable** — keep your
-  original QR codes. You can convert back to Simple only if a password was set.
+  original QR codes. You can convert back to Simple only if a password was set. This mode is much more secure since a compromised host can only extract current OTP codes, but not the seed, meaning the OTP is safe again once breach is resolved. The downside is that loading the keys on app start takes a bit longer if you have many of them, since they have to be calculated in the TPM one by one, and are limited by the TPM crypto processor in speed.
 
   > Some firmware TPMs support SHA‑1/SHA‑256 keyed‑hash keys but not SHA‑512. A SHA‑512 account can't
   > be hosted in Advanced mode on such a chip; it stays in Simple mode with a clear message.
