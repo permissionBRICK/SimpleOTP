@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
@@ -22,6 +23,11 @@ public partial class MainWindow : Window
     }
 
     private MainWindowViewModel? Vm => DataContext as MainWindowViewModel;
+
+    // The account whose ⋯ overflow menu is currently open. Captured from the card's DataContext when the
+    // menu opens (reliable there), so the menu-item handlers don't depend on DataContext reaching the
+    // flyout popup. Only one card menu can be open at a time.
+    private AccountItemViewModel? _menuTarget;
 
     protected override void OnOpened(EventArgs e)
     {
@@ -120,12 +126,19 @@ public partial class MainWindow : Window
         }
     }
 
+    // Opens a card's overflow (⋯) menu. Handled here so the click doesn't fall through to the card's
+    // OnCardClick (which would copy the code); the menu items act on the captured account.
+    private void OnCardMenuClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not Control control) return;
+        _menuTarget = control.DataContext as AccountItemViewModel; // the button lives in the card's tree
+        FlyoutBase.ShowAttachedFlyout(control);
+    }
+
     private async void OnDeleteClick(object? sender, RoutedEventArgs e)
     {
-        // Click is a bubbling routed event; mark it handled so it doesn't also trigger the card's
-        // OnCardClick (which would copy the code). Set synchronously, before any await.
-        e.Handled = true;
-        if ((sender as Control)?.DataContext is not AccountItemViewModel item || Vm is null)
+        if (_menuTarget is not { } item || Vm is null)
             return;
         bool confirmed = await Dialogs.ConfirmAsync(this, "Remove account",
             $"Remove “{item.Title}”?\n\nYou'll need the original QR code or secret to add it again — it cannot be " +
@@ -179,8 +192,7 @@ public partial class MainWindow : Window
 
     private async void OnMoveClick(object? sender, RoutedEventArgs e)
     {
-        e.Handled = true; // don't also copy the code
-        if ((sender as Control)?.DataContext is not AccountItemViewModel item || Vm?.Service is null)
+        if (_menuTarget is not { } item || Vm?.Service is null)
             return;
 
         var folders = Vm.Service.Folders.Select(f => (f.Id, f.Name)).ToList();

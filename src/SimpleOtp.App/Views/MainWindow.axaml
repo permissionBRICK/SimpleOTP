@@ -187,7 +187,7 @@
                                         <Button Classes="card" Click="OnCardClick"
                                                 PointerEntered="OnCardPointerEntered"
                                                 PointerExited="OnCardPointerExited">
-                                            <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                                            <Grid ColumnDefinitions="*,Auto,Auto">
                                                 <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
                                                     <TextBlock Text="{Binding Title}" FontSize="14"
                                                                FontWeight="SemiBold" Foreground="#E7E9EC"
@@ -212,12 +212,19 @@
                                                                VerticalAlignment="Center"/>
                                                 </Grid>
 
-                                                <Button Grid.Column="2" Classes="icon" Content="📁" FontSize="14"
-                                                        ToolTip.Tip="Move to folder" VerticalAlignment="Center"
-                                                        Click="OnMoveClick"/>
-                                                <Button Grid.Column="3" Classes="icon" Content="🗑" FontSize="14"
-                                                        ToolTip.Tip="Remove" VerticalAlignment="Center"
-                                                        Click="OnDeleteClick"/>
+                                                <!-- Overflow menu: folder + delete actions tucked away so the
+                                                     card stays clean. Opened explicitly in code-behind so the
+                                                     click doesn't fall through to the card (which copies). -->
+                                                <Button Grid.Column="2" Classes="icon" Content="⋯" FontSize="20"
+                                                        ToolTip.Tip="More" VerticalAlignment="Center"
+                                                        Click="OnCardMenuClick">
+                                                    <FlyoutBase.AttachedFlyout>
+                                                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                                            <MenuItem Header="Move to folder…" Click="OnMoveClick"/>
+                                                            <MenuItem Header="Remove" Click="OnDeleteClick"/>
+                                                        </MenuFlyout>
+                                                    </FlyoutBase.AttachedFlyout>
+                                                </Button>
                                             </Grid>
                                         </Button>
                                     </DataTemplate>
