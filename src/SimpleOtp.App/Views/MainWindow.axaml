@@ -215,11 +215,14 @@
                                                 <!-- Overflow menu: folder + delete actions tucked away so the
                                                      card stays clean. Opened explicitly in code-behind so the
                                                      click doesn't fall through to the card (which copies). -->
-                                                <Button Grid.Column="2" Classes="icon" Content="⋯" FontSize="20"
-                                                        ToolTip.Tip="More" VerticalAlignment="Center"
+                                                <Button Grid.Column="2" Classes="icon" Content="⋯" FontSize="18"
+                                                        Width="24" ToolTip.Tip="More" VerticalAlignment="Center"
                                                         Click="OnCardMenuClick">
                                                     <FlyoutBase.AttachedFlyout>
                                                         <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                                            <MenuItem Header="Move up" Tag="up" Click="OnMoveUpClick"/>
+                                                            <MenuItem Header="Move down" Tag="down" Click="OnMoveDownClick"/>
+                                                            <Separator/>
                                                             <MenuItem Header="Move to folder…" Click="OnMoveClick"/>
                                                             <MenuItem Header="Remove" Click="OnDeleteClick"/>
                                                         </MenuFlyout>

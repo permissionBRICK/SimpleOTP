@@ -34,6 +34,13 @@ public class FolderTests : IDisposable
         return svc;
     }
 
+    // Adds an account whose Label is <paramref name="label"/>, so order can be asserted by label.
+    private static string AddLabeled(VaultService svc, string label, string? folderId = null)
+        => svc.AddAccount(OtpAuthUri.Parse(SampleUri.Replace("octocat", label)), folderId).Id;
+
+    private static string[] Labels(IEnumerable<SimpleOtp.Core.Model.Account> accounts)
+        => accounts.Select(a => a.Label).ToArray();
+
     [Fact]
     public void AddFolder_AndPlaceAccount_FiltersByFolder()
     {
@@ -109,6 +116,50 @@ public class FolderTests : IDisposable
         var folder = svc.AddFolder("Old");
         svc.RenameFolder(folder.Id, "  New  ");
         Assert.Equal("New", svc.Folders.Single().Name); // trimmed
+    }
+
+    [Fact]
+    public void MoveAccountUpDown_ReordersWithinTopLevel()
+    {
+        using var svc = NewUnlocked(new FakeSealer(), _path);
+        AddLabeled(svc, "a");
+        AddLabeled(svc, "b");
+        AddLabeled(svc, "c");
+
+        string b = svc.AccountsInFolder(null)[1].Id;
+        Assert.True(svc.MoveAccountUp(b));
+        Assert.Equal(new[] { "b", "a", "c" }, Labels(svc.AccountsInFolder(null)));
+        Assert.True(svc.MoveAccountDown(b));
+        Assert.Equal(new[] { "a", "b", "c" }, Labels(svc.AccountsInFolder(null)));
+    }
+
+    [Fact]
+    public void MoveAccount_OnlyReordersWithinItsOwnFolderScope()
+    {
+        using var svc = NewUnlocked(new FakeSealer(), _path);
+        var f = svc.AddFolder("F");
+        AddLabeled(svc, "a");           // top level
+        AddLabeled(svc, "b", f.Id);     // folder
+        AddLabeled(svc, "c");           // top level
+        string d = AddLabeled(svc, "d", f.Id); // folder
+
+        // d's nearest preceding same-folder neighbour is b (with c, a top-level account, in between).
+        Assert.True(svc.MoveAccountUp(d));
+        Assert.Equal(new[] { "d", "b" }, Labels(svc.AccountsInFolder(f.Id)));
+        Assert.Equal(new[] { "a", "c" }, Labels(svc.AccountsInFolder(null))); // top level untouched
+    }
+
+    [Fact]
+    public void MoveAccount_AtScopeEdge_OrUnknown_IsNoOp()
+    {
+        using var svc = NewUnlocked(new FakeSealer(), _path);
+        AddLabeled(svc, "a");
+        AddLabeled(svc, "b");
+
+        Assert.False(svc.MoveAccountUp(svc.AccountsInFolder(null)[0].Id));   // already first
+        Assert.False(svc.MoveAccountDown(svc.AccountsInFolder(null)[1].Id)); // already last
+        Assert.False(svc.MoveAccountUp("does-not-exist"));
+        Assert.Equal(new[] { "a", "b" }, Labels(svc.AccountsInFolder(null)));
     }
 
     [Fact]
