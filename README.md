@@ -19,6 +19,8 @@ codes - with a TPM-backed security model. The headline feature is **Advanced Sec
   multi-QR exports.
 - **Desktop-native authenticator UX** - live countdown rings, click-to-copy codes, lock/unlock, and
   quick account management.
+- **Folders for large vaults** - group accounts into folders and only the open folder's codes are
+  generated, so a vault with far more accounts than the TPM could refresh at once stays responsive.
 - **Device-bound by default** - copying `vault.json` to another computer does not make the secrets
   usable there.
 - **No insecure fallback** - if a TPM 2.0 device is not available, the app refuses to store secrets.
@@ -131,6 +133,11 @@ Open **Add account** with the **+** button.
 ## Everyday Use
 
 - Click a code card to copy the current OTP.
+- **Organize with folders.** Click **🗂 New folder** in the title bar and name it. Folders show on the
+  top level; open one to reveal its accounts. Move an account in (or back out) with the **📁** button on
+  its card, and adding an account while a folder is open files it there. Deleting a folder keeps its
+  accounts — they fall back to the top level. Only the open folder's codes are generated, so foldering a
+  large vault avoids the slowdown of computing every code at once on the TPM.
 - Use **Export** to generate Google Authenticator-compatible migration QR codes.
 - Use **Settings** to change security mode, configure a PIN, or set up network auto-unlock.
 - Use **Lock** to clear unlocked key material from memory until the vault is opened again.
@@ -219,7 +226,7 @@ Simple mode account shape:
 
 ```jsonc
 {
-  "Version": 2,
+  "Version": 3,
   "Backend": "tpm2",
   "Mode": "Simple",
   "PinProtected": false,
@@ -231,14 +238,21 @@ Simple mode account shape:
       "Id": "...",
       "Issuer": "GitHub",
       "Label": "octocat",
+      "FolderId": "<id of a folder below, or omitted for the top level>",
       "Algorithm": "Sha1",
       "Digits": 6,
       "Period": 30,
       "Secret": { "Nonce": "...", "Tag": "...", "Ciphertext": "..." }
     }
+  ],
+  "Folders": [
+    { "Id": "...", "Name": "Work" }
   ]
 }
 ```
+
+Folders are cleartext organizational metadata only — they have no effect on how a secret is protected.
+Schema versions: v1 was Simple-only, v2 added Advanced Security, v3 added folders.
 
 Advanced mode adds TPM object blobs for non-exportable account keys and, only when enabled, encrypted
 export recovery material.

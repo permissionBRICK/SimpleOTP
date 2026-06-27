@@ -53,6 +53,23 @@
             <Setter Property="Background" Value="#272A31"/>
         </Style>
 
+        <!-- Back bar shown at the top of an open folder -->
+        <Style Selector="Button.back">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#C9CDD4"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.back:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#2A2C31"/>
+        </Style>
+
         <Style Selector="TextBlock.code">
             <Setter Property="FontSize" Value="30"/>
             <Setter Property="FontFamily" Value="Cascadia Code,Consolas,Menlo,monospace"/>
@@ -98,7 +115,7 @@
         <DockPanel>
             <!-- Header -->
             <Border DockPanel.Dock="Top" Padding="16,12" Background="#1B1D21">
-                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto,Auto">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">
                     <TextBlock Grid.Column="0" Text="SimpleOTP" FontSize="18" FontWeight="Bold"
                                Foreground="#F2F3F5" VerticalAlignment="Center"/>
                     <Border Grid.Column="1" IsVisible="{Binding IsAdvancedMode}" Background="#243042"
@@ -112,63 +129,105 @@
                             ToolTip.Tip="Update available — click to update"
                             IsVisible="{Binding UpdateAvailable}" Click="OnUpdateClick"/>
                     <Button Grid.Column="4" Classes="icon" Content="📤" ToolTip.Tip="Export accounts"
-                            IsVisible="{Binding HasAccounts}" Click="OnExportClick"/>
+                            IsVisible="{Binding HasAnyAccounts}" Click="OnExportClick"/>
                     <Button Grid.Column="5" Classes="icon" Content="🔒" ToolTip.Tip="Lock"
                             IsVisible="{Binding CanLock}" Click="OnLockClick"/>
                     <Button Grid.Column="6" Classes="icon" Content="⚙" ToolTip.Tip="Settings"
                             IsVisible="{Binding IsReady}" Click="OnSettingsClick"/>
-                    <Button Grid.Column="7" Classes="icon" Content="+" FontSize="24" FontWeight="Bold"
+                    <Button Grid.Column="7" Classes="icon" Content="🗂" ToolTip.Tip="New folder"
+                            IsVisible="{Binding IsAtRoot}" Click="OnAddFolderClick"/>
+                    <Button Grid.Column="8" Classes="icon" Content="+" FontSize="24" FontWeight="Bold"
                             ToolTip.Tip="Add account" IsVisible="{Binding IsReady}" Click="OnAddClick"/>
                 </Grid>
             </Border>
 
             <Panel>
-                <!-- READY: token list -->
-                <Grid IsVisible="{Binding IsReady}" Margin="14,14,14,0">
-                    <ScrollViewer IsVisible="{Binding HasAccounts}">
-                        <ItemsControl ItemsSource="{Binding Tokens}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:AccountItemViewModel">
-                                    <Button Classes="card" Click="OnCardClick"
-                                            PointerEntered="OnCardPointerEntered"
-                                            PointerExited="OnCardPointerExited">
-                                        <Grid ColumnDefinitions="*,Auto,Auto">
-                                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                                                <TextBlock Text="{Binding Title}" FontSize="14"
-                                                           FontWeight="SemiBold" Foreground="#E7E9EC"
-                                                           TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Text="{Binding Subtitle}" FontSize="12"
-                                                           Foreground="#8A8F99"
-                                                           IsVisible="{Binding Subtitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                                           TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Text="{Binding Code}" Classes="code"
-                                                           Classes.expiring="{Binding IsExpiring}"
-                                                           Classes.stale="{Binding IsStale}" Margin="0,4,0,0"/>
-                                            </StackPanel>
+                <!-- READY: folder cards (top level) + the open scope's account cards -->
+                <Grid IsVisible="{Binding IsReady}" Margin="14,14,14,0" RowDefinitions="Auto,*">
+                    <!-- Back bar: shown inside an open folder -->
+                    <Button Grid.Row="0" Classes="back" IsVisible="{Binding IsInFolder}"
+                            Click="OnBackClick" ToolTip.Tip="Back to all folders">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="←" FontSize="16"/>
+                            <TextBlock Text="{Binding CurrentFolderName}" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </Button>
 
-                                            <!-- Ring countdown -->
-                                            <Grid Grid.Column="1" Width="44" Height="44" VerticalAlignment="Center" Margin="8,0">
-                                                <Ellipse Width="40" Height="40" Stroke="#33363D" StrokeThickness="4"/>
-                                                <shapes:Arc Width="40" Height="40" StrokeThickness="4"
-                                                            Stroke="#6AA9FF" StartAngle="-90"
-                                                            SweepAngle="{Binding Progress, Converter={StaticResource ProgressToSweep}}"/>
-                                                <TextBlock Text="{Binding SecondsRemaining}" FontSize="12"
-                                                           Foreground="#C9CDD4" HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center"/>
+                    <ScrollViewer Grid.Row="1" IsVisible="{Binding HasContent}">
+                        <StackPanel>
+                            <!-- Folder cards (top level only). Clicking opens the folder. -->
+                            <ItemsControl ItemsSource="{Binding Folders}" IsVisible="{Binding ShowFolders}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:FolderItemViewModel">
+                                        <Button Classes="card" Click="OnFolderClick">
+                                            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                                                <TextBlock Grid.Column="0" Text="🗂" FontSize="20"
+                                                           VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                    <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
+                                                               Foreground="#E7E9EC" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding CountText}" FontSize="12" Foreground="#8A8F99"/>
+                                                </StackPanel>
+                                                <Button Grid.Column="2" Classes="icon" Content="✎" FontSize="13"
+                                                        ToolTip.Tip="Rename folder" VerticalAlignment="Center"
+                                                        Click="OnRenameFolderClick"/>
+                                                <Button Grid.Column="3" Classes="icon" Content="🗑" FontSize="14"
+                                                        ToolTip.Tip="Delete folder" VerticalAlignment="Center"
+                                                        Click="OnDeleteFolderClick"/>
                                             </Grid>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
 
-                                            <Button Grid.Column="2" Classes="icon" Content="🗑" FontSize="14"
-                                                    ToolTip.Tip="Remove" VerticalAlignment="Center"
-                                                    Click="OnDeleteClick"/>
-                                        </Grid>
-                                    </Button>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                            <!-- Account cards for the current scope -->
+                            <ItemsControl ItemsSource="{Binding Tokens}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:AccountItemViewModel">
+                                        <Button Classes="card" Click="OnCardClick"
+                                                PointerEntered="OnCardPointerEntered"
+                                                PointerExited="OnCardPointerExited">
+                                            <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                                                    <TextBlock Text="{Binding Title}" FontSize="14"
+                                                               FontWeight="SemiBold" Foreground="#E7E9EC"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding Subtitle}" FontSize="12"
+                                                               Foreground="#8A8F99"
+                                                               IsVisible="{Binding Subtitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding Code}" Classes="code"
+                                                               Classes.expiring="{Binding IsExpiring}"
+                                                               Classes.stale="{Binding IsStale}" Margin="0,4,0,0"/>
+                                                </StackPanel>
+
+                                                <!-- Ring countdown -->
+                                                <Grid Grid.Column="1" Width="44" Height="44" VerticalAlignment="Center" Margin="8,0">
+                                                    <Ellipse Width="40" Height="40" Stroke="#33363D" StrokeThickness="4"/>
+                                                    <shapes:Arc Width="40" Height="40" StrokeThickness="4"
+                                                                Stroke="#6AA9FF" StartAngle="-90"
+                                                                SweepAngle="{Binding Progress, Converter={StaticResource ProgressToSweep}}"/>
+                                                    <TextBlock Text="{Binding SecondsRemaining}" FontSize="12"
+                                                               Foreground="#C9CDD4" HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"/>
+                                                </Grid>
+
+                                                <Button Grid.Column="2" Classes="icon" Content="📁" FontSize="14"
+                                                        ToolTip.Tip="Move to folder" VerticalAlignment="Center"
+                                                        Click="OnMoveClick"/>
+                                                <Button Grid.Column="3" Classes="icon" Content="🗑" FontSize="14"
+                                                        ToolTip.Tip="Remove" VerticalAlignment="Center"
+                                                        Click="OnDeleteClick"/>
+                                            </Grid>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
                     </ScrollViewer>
 
-                    <!-- Empty state -->
-                    <StackPanel IsVisible="{Binding !HasAccounts}" VerticalAlignment="Center"
+                    <!-- Empty vault placeholder (top level, no folders, no accounts) -->
+                    <StackPanel Grid.Row="1" IsVisible="{Binding IsEmptyState}" VerticalAlignment="Center"
                                 HorizontalAlignment="Center" Spacing="10" Margin="24">
                         <TextBlock Text="🔐" FontSize="44" HorizontalAlignment="Center"/>
                         <TextBlock Text="No accounts yet" FontSize="18" FontWeight="SemiBold"
@@ -177,6 +236,16 @@
                                    Foreground="#8A8F99" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="280"/>
                         <Button Classes="primary" Content="+  Add account" HorizontalAlignment="Center"
                                 Margin="0,6,0,0" Click="OnAddClick"/>
+                    </StackPanel>
+
+                    <!-- Empty open folder -->
+                    <StackPanel Grid.Row="1" IsVisible="{Binding IsFolderEmpty}" VerticalAlignment="Center"
+                                HorizontalAlignment="Center" Spacing="10" Margin="24">
+                        <TextBlock Text="🗂" FontSize="44" HorizontalAlignment="Center"/>
+                        <TextBlock Text="This folder is empty" FontSize="18" FontWeight="SemiBold"
+                                   Foreground="#E7E9EC" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Add an account while this folder is open, or move one here with the 📁 button on a card."
+                                   Foreground="#8A8F99" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="280"/>
                     </StackPanel>
                 </Grid>
 

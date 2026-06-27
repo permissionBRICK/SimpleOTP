@@ -232,7 +232,7 @@ public class AdvancedSecurityTests : IDisposable
     }
 
     [Fact]
-    public void ConvertingLegacyV1Vault_StampsSchemaVersion2()
+    public void ConvertingLegacyV1Vault_StampsCurrentSchemaVersion()
     {
         var device = new FakeSealer();
         using (var svc = new VaultService(device, _path))
@@ -254,7 +254,7 @@ public class AdvancedSecurityTests : IDisposable
         }
 
         var saved = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(_path))!.AsObject();
-        Assert.Equal(2, (int)saved["Version"]!);            // migrated forward on write
+        Assert.Equal(VaultFile.CurrentSchemaVersion, (int)saved["Version"]!); // migrated forward on write
         Assert.Equal("Advanced", (string?)saved["Mode"]);
     }
 }

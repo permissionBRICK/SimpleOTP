@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -133,6 +134,70 @@ public partial class MainWindow : Window
             Vm.DeleteItem(item);
     }
 
+    // --- Folders --------------------------------------------------------------
+
+    private async void OnAddFolderClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is null) return;
+        string? name = await Dialogs.PromptAsync(this, "New folder", "Name this folder.", "Create",
+            placeholder: "Folder name");
+        if (string.IsNullOrWhiteSpace(name)) return; // cancelled or blank
+        Vm.AddFolder(name);
+        await Vm.ShowToastAsync("Folder created");
+    }
+
+    private void OnBackClick(object? sender, RoutedEventArgs e) => Vm?.GoToRoot();
+
+    private void OnFolderClick(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is FolderItemViewModel folder)
+            Vm?.OpenFolder(folder.Id);
+    }
+
+    private async void OnRenameFolderClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true; // don't also open the folder
+        if ((sender as Control)?.DataContext is not FolderItemViewModel folder || Vm is null)
+            return;
+        string? name = await Dialogs.PromptAsync(this, "Rename folder", "Choose a new name.", "Rename",
+            placeholder: "Folder name", initial: folder.Name);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        Vm.RenameFolder(folder.Id, name);
+    }
+
+    private async void OnDeleteFolderClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true; // don't also open the folder
+        if ((sender as Control)?.DataContext is not FolderItemViewModel folder || Vm is null)
+            return;
+        bool confirmed = await Dialogs.ConfirmAsync(this, "Delete folder",
+            $"Delete the folder “{folder.Name}”?\n\nAccounts inside it move back to the top level — none are removed.",
+            "Delete");
+        if (confirmed)
+            Vm.DeleteFolder(folder.Id);
+    }
+
+    private async void OnMoveClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true; // don't also copy the code
+        if ((sender as Control)?.DataContext is not AccountItemViewModel item || Vm?.Service is null)
+            return;
+
+        var folders = Vm.Service.Folders.Select(f => (f.Id, f.Name)).ToList();
+        if (folders.Count == 0)
+        {
+            await Dialogs.AlertAsync(this, "No folders yet",
+                "Create a folder first with the 🗂 button in the title bar, then you can move accounts into it.");
+            return;
+        }
+
+        Dialogs.FolderPick? pick = await Dialogs.ChooseFolderAsync(this, folders, item.Account.FolderId);
+        if (pick is null || pick.FolderId == item.Account.FolderId)
+            return; // cancelled or no change
+        Vm.MoveItemToFolder(item, pick.FolderId);
+        await Vm.ShowToastAsync("Moved");
+    }
+
     private async void OnAddClick(object? sender, RoutedEventArgs e)
     {
         if (Vm?.Service is null)
@@ -143,8 +208,10 @@ public partial class MainWindow : Window
             return;
         try
         {
+            // Adding while a folder is open files the new accounts into it; at the top level they stay
+            // uncategorized (CurrentFolderId is null).
             foreach (OtpAuthData data in accounts)
-                Vm.Service.AddAccount(data);
+                Vm.Service.AddAccount(data, Vm.CurrentFolderId);
             Vm.ReloadTokens();
             await Vm.ShowToastAsync(accounts.Count == 1 ? "Account added" : $"{accounts.Count} accounts added");
         }

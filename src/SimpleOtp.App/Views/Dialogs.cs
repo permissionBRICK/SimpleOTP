@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -34,11 +35,11 @@ public static class Dialogs
 
     /// <summary>Prompts for a single line of (optionally masked) text. Returns null if cancelled.</summary>
     public static Task<string?> PromptAsync(Window owner, string title, string message, string okText,
-        string placeholder = "", bool isPassword = false)
+        string placeholder = "", bool isPassword = false, string initial = "")
     {
         var tcs = new TaskCompletionSource<string?>();
 
-        var input = new TextBox { PlaceholderText = placeholder, Margin = new Thickness(0, 4, 0, 0) };
+        var input = new TextBox { PlaceholderText = placeholder, Text = initial, Margin = new Thickness(0, 4, 0, 0) };
         if (isPassword) input.PasswordChar = '•';
 
         var cancel = new Button { Content = "Cancel", MinWidth = 88, HorizontalContentAlignment = HorizontalAlignment.Center };
@@ -57,8 +58,76 @@ public static class Dialogs
         ok.Click += (_, _) => Submit();
         input.KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) Submit(); };
         window.Closed += (_, _) => tcs.TrySetResult(null);
-        window.Opened += (_, _) => input.Focus();
+        window.Opened += (_, _) => { input.Focus(); input.SelectAll(); };
 
+        window.ShowDialog(owner);
+        return tcs.Task;
+    }
+
+    /// <summary>Result of <see cref="ChooseFolderAsync"/>: the chosen folder id (null = top level).</summary>
+    public sealed record FolderPick(string? FolderId);
+
+    /// <summary>
+    /// Shows a vertical list of folders (plus a "Top level" option) and returns the picked one, or null
+    /// if cancelled. The account's current folder is marked with a check so a no-op move is obvious.
+    /// </summary>
+    public static Task<FolderPick?> ChooseFolderAsync(Window owner,
+        IReadOnlyList<(string Id, string Name)> folders, string? currentFolderId)
+    {
+        var tcs = new TaskCompletionSource<FolderPick?>();
+        Window? window = null;
+
+        var options = new StackPanel { Spacing = 8 };
+        Button Choice(string label, string? id)
+        {
+            var b = new Button
+            {
+                Content = label + (id == currentFolderId ? "   ✓" : ""),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Padding = new Thickness(12, 9),
+            };
+            b.Click += (_, _) => { tcs.TrySetResult(new FolderPick(id)); window?.Close(); };
+            return b;
+        }
+
+        options.Children.Add(Choice("Top level (no folder)", null));
+        foreach ((string id, string name) in folders)
+            options.Children.Add(Choice(string.IsNullOrWhiteSpace(name) ? "(unnamed folder)" : name, id));
+
+        var cancel = new Button
+        {
+            Content = "Cancel",
+            MinWidth = 88,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+        };
+        cancel.Click += (_, _) => { tcs.TrySetResult(null); window?.Close(); };
+
+        var content = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Spacing = 16,
+            Children =
+            {
+                new TextBlock { Text = "Move to folder", FontSize = 16, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White },
+                new ScrollViewer { Content = options, MaxHeight = 320 },
+                cancel,
+            },
+        };
+
+        window = new Window
+        {
+            Title = "Move to folder",
+            Width = 360,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark,
+            Background = new SolidColorBrush(Color.Parse("#1E2024")),
+            Content = content,
+        };
+        window.Closed += (_, _) => tcs.TrySetResult(null);
         window.ShowDialog(owner);
         return tcs.Task;
     }
