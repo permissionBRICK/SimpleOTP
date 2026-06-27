@@ -6,6 +6,11 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <ApplicationIcon>Assets/simpleotp.ico</ApplicationIcon>
+    <!-- Ship a clean "SimpleOtp" apphost (SimpleOtp.exe / SimpleOtp) rather than "SimpleOtp.App".
+         The installers, the /usr/bin symlink, the .desktop launcher and the Inno AppMutex/relaunch
+         all reference this name. RootNamespace stays SimpleOtp.App so C# namespaces are unchanged. -->
+    <AssemblyName>SimpleOtp</AssemblyName>
+    <RootNamespace>SimpleOtp.App</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

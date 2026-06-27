@@ -1,0 +1,17 @@
+<Project>
+
+  <!--
+    Shared MSBuild properties for every project in the solution.
+
+    Versioning: the release version is stamped by CI via `-p:Version=MAJOR.MINOR.PATCH`, where
+    MAJOR.MINOR come from version.json and PATCH auto-increments per release (see
+    .github/workflows/release.yml). For local builds Version defaults to 0.0.0, which the in-app
+    updater treats as an unstamped dev build and skips the update check for.
+  -->
+  <PropertyGroup>
+    <Product>SimpleOTP</Product>
+    <Company>permissionBRICK</Company>
+    <Version Condition="'$(Version)' == ''">0.0.0</Version>
+  </PropertyGroup>
+
+</Project>
