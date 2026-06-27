@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using SimpleOtp.App.ViewModels;
 using SimpleOtp.Core.Totp;
 
@@ -21,13 +23,26 @@ public partial class MainWindow : Window
     protected override void OnOpened(EventArgs e)
     {
         base.OnOpened(e);
+        if (Vm is not null)
+            Vm.PropertyChanged += OnVmPropertyChanged;
         _ = Vm?.BootstrapAsync();
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        if (Vm is not null)
+            Vm.PropertyChanged -= OnVmPropertyChanged;
         Vm?.Shutdown(); // stop the timer + background generation worker
         base.OnClosed(e);
+    }
+
+    // When the vault opens straight into the locked state (PIN enabled, no auto-unlock), or whenever it
+    // relocks, put the cursor in the PIN box so the user can just start typing. Deferred to the dispatcher
+    // so the locked view's visibility binding has settled before we focus.
+    private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainWindowViewModel.IsLocked) && Vm?.IsLocked == true)
+            Dispatcher.UIThread.Post(() => PinBox.Focus());
     }
 
     // Hovering a card bumps its code to the front of the background generation queue, so a code you're
