@@ -10,4 +10,8 @@
     <PackageReference Include="Otp.NET" Version="1.4.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="SimpleOtp.Tests" />
+  </ItemGroup>
+
 </Project>
