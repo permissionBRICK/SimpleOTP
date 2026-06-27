@@ -166,6 +166,9 @@ jobs:
     env:
       VT_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history + tags so the changelog can diff against the last release
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -173,12 +176,48 @@ jobs:
           pattern: pkg-*
           merge-multiple: true
       - run: ls -R dist
+
+      # Compose the release body: a readable Downloads block (links built from the actual artifact
+      # filenames in dist/) followed by the commit log since the last successful release tag.
+      - name: Build release notes
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/$REPO/releases/download/$TAG"
+          # Emit "[label](download-url)" for the first dist/ file matching a glob, else just the label.
+          link() {
+            local label="$1" glob="$2" f
+            f=$(find dist -maxdepth 1 -type f -name "$glob" -printf '%f\n' 2>/dev/null | head -n1)
+            if [ -n "$f" ]; then printf '[%s](%s/%s)' "$label" "$BASE" "$f"; else printf '%s' "$label"; fi
+          }
+          {
+            echo "## Downloads"
+            echo ""
+            printf -- '- **Installer:** Windows %s / %s\n' \
+              "$(link x64 'SimpleOTP-Setup-*-win-x64.exe')" "$(link ARM 'SimpleOTP-Setup-*-win-arm64.exe')"
+            printf -- '- **Portable:** Windows %s / %s\n' \
+              "$(link x64 'SimpleOTP-*-win-x64-portable.zip')" "$(link ARM 'SimpleOTP-*-win-arm64-portable.zip')"
+            printf -- '- **Linux:** Deb %s / %s &middot; RPM %s / %s &middot; tar %s / %s\n' \
+              "$(link x64 'simpleotp_*_amd64.deb')"  "$(link ARM 'simpleotp_*_arm64.deb')" \
+              "$(link x64 'simpleotp-*.x86_64.rpm')" "$(link ARM 'simpleotp-*.aarch64.rpm')" \
+              "$(link x64 'SimpleOTP-*-linux-x64.tar.gz')" "$(link ARM 'SimpleOTP-*-linux-arm64.tar.gz')"
+            echo ""
+            PREV=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+            if [ -n "$PREV" ]; then echo "## Changes since $PREV"; else echo "## Changes"; fi
+            echo ""
+            git log --no-merges --pretty=format:'- %s (%h)' "${PREV:+$PREV..}HEAD"
+            echo ""
+          } > release-notes.md
+          cat release-notes.md
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: ${{ needs.version.outputs.tag }}
-          generate_release_notes: true
+          body_path: release-notes.md
           fail_on_unmatched_files: true
           files: |
             dist/*.exe
