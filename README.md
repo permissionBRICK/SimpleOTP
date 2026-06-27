@@ -23,6 +23,45 @@ codes - with a TPM-backed security model. The headline feature is **Advanced Sec
   usable there.
 - **No insecure fallback** - if a TPM 2.0 device is not available, the app refuses to store secrets.
 
+## Download & Install
+
+Grab the latest build for your platform from the
+[Releases page](https://github.com/permissionBRICK/SimpleOTP/releases).
+
+**Windows**
+
+- **Installer** — `SimpleOTP-Setup-<version>-win-x64.exe` (or `-win-arm64`). Choose a per-user or
+  all-users install and the location; it checks for the .NET 10 runtime and downloads it if missing,
+  and adds Start-menu / desktop shortcuts.
+- **Portable** — `SimpleOTP-<version>-win-x64-portable.zip` (or `-win-arm64`). Self-contained: unzip
+  into a folder and run `SimpleOtp.exe`; no install or runtime needed.
+
+**Linux**
+
+- **Debian/Ubuntu** — `sudo apt install ./simpleotp_<version>_amd64.deb` (or `_arm64`).
+- **Fedora/RHEL** — `sudo dnf install ./simpleotp-<version>-1.x86_64.rpm` (or `.aarch64`).
+- **Any distro** — extract `SimpleOTP-<version>-linux-x64.tar.gz` (or `-linux-arm64`) and run
+  `SimpleOTP/install.sh`. It picks a per-user (`~/.local`) or system (`/opt`, with `sudo`) install,
+  installs the .NET 10 runtime if missing, and adds a desktop launcher; `uninstall.sh` reverses it.
+
+Secrets are sealed to your machine's TPM, so a vault copied from another machine will not open — install
+fresh and re-add your accounts there.
+
+## Updating
+
+On startup SimpleOTP checks GitHub for a newer release. When one is found it shows a popup with
+**Update** / **Ignore**:
+
+- **Update** downloads the package matching how you installed it and applies it in one click, then
+  restarts the app (on Windows the installer re-runs silently; on Linux the script swaps files or runs
+  your package manager via a graphical prompt).
+- **Ignore** hides the popup for that version and shows a small **update** indicator in the title bar
+  instead — click it any time to update. A strictly newer release will prompt again.
+
+Turn the automatic check off in **Settings -> Software updates** (or untick it during the Windows
+install). With it off, update yourself from the **Open releases page** button or the
+[Releases page](https://github.com/permissionBRICK/SimpleOTP/releases).
+
 ## Security Modes
 
 Choose the mode in **Settings -> Security mode**.
@@ -39,10 +78,16 @@ TPM device binding plus simpler export workflows.
 
 ## Requirements
 
-- **.NET 10 SDK**
-- **TPM 2.0**
-  - Windows: TBS
-  - Linux: `/dev/tpmrm0`
+**To run** (end users):
+
+- A **TPM 2.0** device — Windows: TBS · Linux: `/dev/tpmrm0`. Required by **every** build, including the
+  portable zip.
+- The **.NET 10 Runtime** (`Microsoft.NETCore.App`). The Windows installer and the Linux `install.sh`
+  install it for you if it is missing; the `.deb`/`.rpm` packages **recommend** it (a soft dependency)
+  and the post-install step warns with the exact install command if it is absent. The portable Windows
+  zip is self-contained, so it needs no separate runtime — but it still needs the TPM.
+
+**To build**: the **.NET 10 SDK**.
 
 ## Build & Run
 
@@ -52,16 +97,20 @@ dotnet test
 dotnet run --project src/SimpleOtp.App
 ```
 
-Publish a self-contained Windows executable:
+Release builds are **framework-dependent** (smaller, faster startup; the runtime is installed
+separately). Publish for a specific runtime:
 
 ```bash
-dotnet publish src/SimpleOtp.App -r win-x64 -c Release --self-contained \
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+dotnet publish src/SimpleOtp.App -c Release -r linux-x64 --no-self-contained -p:PublishReadyToRun=true
 ```
 
-For Linux, swap `-r win-x64` for `-r linux-x64`.
+Swap `-r` for `win-x64`, `win-arm64`, or `linux-arm64`. Do **not** use `PublishTrimmed` — Avalonia view
+location relies on reflection. (The portable Windows zip is the exception: it is built `--self-contained`
+so it runs without the runtime.)
 
-Do not use `PublishTrimmed`; Avalonia view location relies on reflection.
+Installers and packages are produced automatically by CI (see [Releasing](#releasing--versioning-maintainers)).
+To build them locally, see [installer/README.md](installer/README.md) (Windows) and
+[packaging/linux/](packaging/linux/) (Linux).
 
 ## Import Accounts
 
@@ -194,17 +243,37 @@ Simple mode account shape:
 Advanced mode adds TPM object blobs for non-exportable account keys and, only when enabled, encrypted
 export recovery material.
 
+## Releasing & Versioning (maintainers)
+
+Pushing to `master` triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which
+builds every artifact (Windows installer + portable zip; Linux `.tar.gz`, `.deb`, `.rpm`; for x64 and
+arm64) and publishes a GitHub release.
+
+Versions are `MAJOR.MINOR.PATCH`:
+
+- `MAJOR.MINOR` live in [`version.json`](version.json). Change them with `scripts/set-version.sh 1.2`
+  (or `scripts/set-version.ps1 1.2`), then commit and push.
+- `PATCH` auto-increments: CI counts the existing `v<major>.<minor>.*` tags, so each push to `master`
+  cuts the next patch and bumping major/minor restarts patch at `0`.
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds and tests pull requests and feature branches.
+
 ## Project Layout
 
 ```text
 SimpleOtp.slnx
+|-- version.json            MAJOR.MINOR release line (CI computes PATCH)
 |-- src/
-|   |-- SimpleOtp.Core/     TOTP engine, otpauth parser, vault, store, auto-unlock client
+|   |-- SimpleOtp.Core/     TOTP engine, otpauth parser, vault, store, auto-unlock, update checker
 |   |-- SimpleOtp.Tpm/      TPM 2.0 sealer implementation over Microsoft.TSS
 |   |-- SimpleOtp.Import/   QR decoding and encoding
-|   `-- SimpleOtp.App/      Avalonia 12 GUI
-`-- tests/
-    `-- SimpleOtp.Tests/    xUnit tests for TOTP, parsing, vaults, QR, security modes, view models
+|   `-- SimpleOtp.App/      Avalonia 12 GUI (incl. update service + UI)
+|-- tests/
+|   `-- SimpleOtp.Tests/    xUnit tests for TOTP, parsing, vaults, QR, security modes, updates, view models
+|-- installer/             Inno Setup Windows installer
+|-- packaging/linux/       nfpm .deb/.rpm config + tar.gz install scripts
+|-- scripts/               set-version helpers
+`-- .github/workflows/     ci + auto-release
 ```
 
 The TPM implementation sits behind `ISecretSealer`, so the core logic stays unit-testable with an
