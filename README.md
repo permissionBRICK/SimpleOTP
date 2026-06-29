@@ -5,7 +5,7 @@ A secure, multi-platform desktop authenticator vault for 2FA codes, built with .
 SimpleOTP gives you the familiar authenticator app flow - accounts, live countdowns, click-to-copy
 codes - with a TPM-backed security model. The headline feature is **Advanced Security mode**:
 
-2FA codes are stored and calculated entirely inside the TPM. This means that unlike with conventional tools like Bitwarden, an attacker could only ever extract the current 2FA code, but never any future codes without continued access to the device.
+2FA codes are stored and calculated entirely inside the TPM. This means that unlike with conventional tools like Bitwarden, an attacker could only ever extract the current 2FA code, but never any future codes without continued access to the device. This allows it to at least cryptographically reach the same security level as a dedicated device like a Yubikey.
 
 ![main window](docs/screenshot-main.png)
 
