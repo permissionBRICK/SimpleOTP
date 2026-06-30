@@ -38,13 +38,24 @@ public sealed class WrongDeviceException : SealerException
 public sealed class TpmLockedException : SealerException
 {
     /// <summary>
-    /// Seconds the TPM needs before it will accept another attempt (the chip's lockout recovery
-    /// interval), when the backend can report it; null if unknown.
+    /// Seconds for a genuine TPM-hardware lockout to recover (the chip's lockout interval), shown as a
+    /// live countdown; null when this is not a hardware lockout.
     /// </summary>
     public int? RecoverySeconds { get; }
 
-    public TpmLockedException(string message, int? recoverySeconds = null, Exception? inner = null)
-        : base(message, inner) => RecoverySeconds = recoverySeconds;
+    /// <summary>
+    /// A rough wait estimate for an OS-managed lockout (e.g. Windows' standard-user TPM lockout) whose
+    /// true duration the TPM does not report; shown as a static "wait approximately…" suggestion. Null
+    /// if no estimate is available.
+    /// </summary>
+    public int? SuggestedWaitSeconds { get; }
+
+    public TpmLockedException(string message, int? recoverySeconds = null, int? suggestedWaitSeconds = null, Exception? inner = null)
+        : base(message, inner)
+    {
+        RecoverySeconds = recoverySeconds;
+        SuggestedWaitSeconds = suggestedWaitSeconds;
+    }
 }
 
 /// <summary>

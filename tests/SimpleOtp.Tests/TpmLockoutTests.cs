@@ -102,6 +102,24 @@ public class TpmLockoutTests
     public void ComputeEffectiveMaxAuthFail_TakesTheSmallerRealLimit(int hardwareMax, int? standardUser, int expected)
         => Assert.Equal(expected, TpmSecretSealer.ComputeEffectiveMaxAuthFail(hardwareMax, standardUser));
 
+    [Theory]
+    [InlineData(600, 4, 2400)] // 10 min interval * 4 tries ~= 40 min estimated total to clear
+    [InlineData(600, 0, null)] // no failed tries -> no estimate
+    [InlineData(0, 4, null)]   // chip reports no interval -> no estimate
+    public void OsLockoutWaitEstimateSeconds_IsIntervalTimesTries(int interval, int counter, int? expected)
+        => Assert.Equal(expected, TpmSecretSealer.OsLockoutWaitEstimateSeconds(interval, counter));
+
+    [Theory]
+    [InlineData(2400, "approximately 40 minutes")] // the user's case: 10 min * 4
+    [InlineData(60, "approximately 1 minute")]     // singular
+    [InlineData(5400, "approximately 1 hour 30 minutes")]
+    public void FormatLockoutSuggestion_StatesAnApproximateWait(int seconds, string expected)
+        => Assert.Contains(expected, MainWindowViewModel.FormatLockoutSuggestion(seconds));
+
+    [Fact]
+    public void FormatLockoutSuggestion_WithoutEstimate_GivesGenericGuidance()
+        => Assert.Contains("Wait a few minutes", MainWindowViewModel.FormatLockoutSuggestion(null));
+
     // After a lockout countdown elapses it leaves a "Lockout cleared…" line; a later wrong PIN must
     // replace it, not show both messages stacked. Drives the real Unlock() command through a locked,
     // PIN-protected vault so the wrong PIN raises WrongPinException exactly as in production.
