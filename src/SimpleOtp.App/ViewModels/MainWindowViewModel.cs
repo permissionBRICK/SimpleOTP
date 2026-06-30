@@ -102,6 +102,13 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _unlockPin = "";
     [ObservableProperty] private string _unlockError = "";
 
+    // TPM dictionary-attack lockout. While locked out the PIN box and Unlock button are disabled and a
+    // live countdown is shown; the timer re-enables input once the chip's recovery interval elapses.
+    [ObservableProperty] private bool _isLockedOut;
+    [ObservableProperty] private string _lockoutMessage = "";
+    private readonly DispatcherTimer _lockoutTimer;
+    private int _lockoutRemaining;
+
     // Toast overlay.
     [ObservableProperty] private bool _isToastVisible;
     [ObservableProperty] private string _toastText = "";
@@ -125,6 +132,8 @@ public partial class MainWindowViewModel : ViewModelBase
         Update = update;
         _timer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(100) };
         _timer.Tick += (_, _) => Tick();
+        _lockoutTimer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromSeconds(1) };
+        _lockoutTimer.Tick += (_, _) => LockoutTick();
         if (sealer is null)
         {
             IsReady = true;       // design-time
@@ -139,7 +148,7 @@ public partial class MainWindowViewModel : ViewModelBase
         UpdateAvailable = true;
     }
 
-    public VaultService? Service { get; private set; }
+    public VaultService? Service { get; internal set; }
 
     /// <summary>Detects the TPM and opens/creates the vault. Call once after the window is shown.</summary>
     public async Task BootstrapAsync()
@@ -223,7 +232,11 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private void Unlock()
     {
-        if (Service is null) return;
+        if (Service is null || IsLockedOut) return;
+        // Starting a fresh attempt clears any leftover lockout text (e.g. the "Lockout cleared…" line a
+        // countdown leaves behind, or an unknown-duration lockout notice), so it can't linger beside the
+        // next wrong-PIN / error message. The lockout path below re-sets it via BeginLockout.
+        LockoutMessage = "";
         try
         {
             Service.Unlock(UnlockPin);
@@ -231,18 +244,82 @@ public partial class MainWindowViewModel : ViewModelBase
             UnlockError = "";
             EnterReady();
         }
-        catch (WrongPinException)
+        catch (WrongPinException ex)
         {
-            UnlockError = "Wrong PIN. Try again.";
+            UnlockError = FormatWrongPin(ex.RemainingAttempts);
         }
         catch (TpmLockedException ex)
         {
-            UnlockError = ex.Message;
+            BeginLockout(ex.RecoverySeconds);
         }
         catch (WrongDeviceException ex)
         {
-            SetError(ex.Message);
+            SetError(ex.Message); // wrong device is unrecoverable here — show the full error screen
         }
+        catch (Exception ex)
+        {
+            // Anything else (a base SealerException, an I/O error, …) must not crash the app: keep the
+            // user on the lock screen with the reason so they can retry, lock, or quit.
+            UnlockError = "Couldn't unlock: " + ex.Message;
+        }
+    }
+
+    /// <summary>Wrong-PIN message, including attempts-left when the TPM reports it.</summary>
+    internal static string FormatWrongPin(int? remainingAttempts) =>
+        remainingAttempts is int n && n > 0
+            ? $"Wrong PIN. {n} {(n == 1 ? "attempt" : "attempts")} left before the TPM locks."
+            : "Wrong PIN. Try again.";
+
+    /// <summary>Human-friendly "try again in …" line for the lockout countdown.</summary>
+    internal static string FormatLockoutCountdown(int secondsRemaining)
+    {
+        var ts = TimeSpan.FromSeconds(Math.Max(0, secondsRemaining));
+        string time =
+            ts.TotalHours >= 1 ? $"{(int)ts.TotalHours}h {ts.Minutes:00}m {ts.Seconds:00}s" :
+            ts.TotalMinutes >= 1 ? $"{ts.Minutes}m {ts.Seconds:00}s" :
+            $"{ts.Seconds}s";
+        return $"Too many wrong PINs — the TPM is locked. Try again in {time}.";
+    }
+
+    // Enter the locked-out state. With a known recovery interval, disable input and count it down;
+    // otherwise just show the reason and leave input enabled (a still-locked retry re-enters this path).
+    private void BeginLockout(int? recoverySeconds)
+    {
+        UnlockPin = "";
+        UnlockError = "";
+        if (recoverySeconds is int s && s > 0)
+        {
+            _lockoutRemaining = s;
+            IsLockedOut = true;
+            LockoutMessage = FormatLockoutCountdown(_lockoutRemaining);
+            _lockoutTimer.Start();
+        }
+        else
+        {
+            ResetLockout();
+            LockoutMessage =
+                "The TPM is locked from too many wrong PINs. Wait for it to recover, or reboot, then try again.";
+        }
+    }
+
+    private void LockoutTick()
+    {
+        if (--_lockoutRemaining <= 0)
+        {
+            _lockoutTimer.Stop();
+            IsLockedOut = false;
+            LockoutMessage = "Lockout cleared — enter your PIN to try again.";
+            return;
+        }
+        LockoutMessage = FormatLockoutCountdown(_lockoutRemaining);
+    }
+
+    private void ResetLockout()
+    {
+        _lockoutTimer.Stop();
+        _lockoutRemaining = 0;
+        IsLockedOut = false;
+        LockoutMessage = "";
     }
 
     [RelayCommand]
@@ -258,6 +335,7 @@ public partial class MainWindowViewModel : ViewModelBase
         RefreshScopeFlags();
         Service.Lock();
         UnlockPin = "";
+        ResetLockout();
         SetState(locked: true);
     }
 
@@ -411,6 +489,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void EnterReady()
     {
+        ResetLockout();
         ReloadTokens();
         SetState(ready: true);
         PinSet = Service?.PinProtected ?? false;
@@ -456,6 +535,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public void Shutdown()
     {
         _timer.Stop();
+        _lockoutTimer.Stop();
         StopGenerator();
     }
 
