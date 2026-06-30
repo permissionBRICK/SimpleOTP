@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using SimpleOtp.Core.Crypto;
@@ -94,7 +95,7 @@ public sealed class TpmSecretSealer : ISecretSealer
         }
         catch (TpmException ex)
         {
-            throw new SealerException($"TPM seal failed: {ex.Message}", ex);
+            throw WrapTpmException(ex, "TPM seal failed");
         }
         finally
         {
@@ -110,6 +111,14 @@ public sealed class TpmSecretSealer : ISecretSealer
         {
             using var dev = ConnectDevice();
             using var tpm = new Tpm2(dev);
+
+            // If the chip is already in dictionary-attack lockout, bail out cleanly before issuing any
+            // command: some TPMs fault the very next auth-bearing operation (which would otherwise
+            // surface as an opaque, uncaught error). This makes lockout a typed, actionable exception.
+            LockoutStatus? pre = TryReadLockoutStatus(tpm);
+            if (pre is { InLockout: true } locked)
+                throw new TpmLockedException(LockoutMessage, recoverySeconds: locked.RecoverySeconds);
+
             TpmHandle srk = CreateSrk(tpm);
             try
             {
@@ -128,7 +137,7 @@ public sealed class TpmSecretSealer : ISecretSealer
                     byte[] data = tpm[authArr]._AllowErrors().Unseal(loaded);
                     TpmRc rc = tpm._GetLastResponseCode();
                     if (rc != TpmRc.Success)
-                        throw MapAuthFailure(rc);
+                        throw MapAuthFailure(tpm, rc);
                     return data;
                 }
                 finally
@@ -147,7 +156,7 @@ public sealed class TpmSecretSealer : ISecretSealer
         }
         catch (TpmException ex)
         {
-            throw new SealerException($"TPM unseal failed: {ex.Message}", ex);
+            throw WrapTpmException(ex, "TPM unseal failed");
         }
         finally
         {
@@ -200,7 +209,7 @@ public sealed class TpmSecretSealer : ISecretSealer
         }
         catch (TpmException ex)
         {
-            throw new SealerException($"TPM HMAC-key import failed: {ex.Message}", ex);
+            throw WrapTpmException(ex, "TPM HMAC-key import failed");
         }
         finally
         {
@@ -238,7 +247,7 @@ public sealed class TpmSecretSealer : ISecretSealer
                     byte[] mac = tpm[authArr]._AllowErrors().Hmac(loaded, dataArr, hashAlg);
                     TpmRc rc = tpm._GetLastResponseCode();
                     if (rc != TpmRc.Success)
-                        throw MapAuthFailure(rc);
+                        throw MapAuthFailure(tpm, rc);
                     return mac;
                 }
                 finally
@@ -257,7 +266,7 @@ public sealed class TpmSecretSealer : ISecretSealer
         }
         catch (TpmException ex)
         {
-            throw new SealerException($"TPM HMAC computation failed: {ex.Message}", ex);
+            throw WrapTpmException(ex, "TPM HMAC computation failed");
         }
         finally
         {
@@ -280,14 +289,111 @@ public sealed class TpmSecretSealer : ISecretSealer
     private static byte[] NormalizeAuth(ReadOnlySpan<byte> auth)
         => auth.IsEmpty ? Array.Empty<byte>() : SHA256.HashData(auth);
 
-    private static SealerException MapAuthFailure(TpmRc rc) => rc switch
+    private const string LockoutMessage =
+        "The TPM is locked because of too many incorrect PIN attempts. Wait for it to recover, or reboot.";
+
+    // Translate a failed auth response into a typed exception, enriching it with live dictionary-attack
+    // state so the UI can show the attempts left / recovery countdown. The state is read on the same
+    // connection right after the failure; reading capabilities needs no auth and isn't DA-gated.
+    private static SealerException MapAuthFailure(Tpm2 tpm, TpmRc rc)
     {
-        TpmRc.AuthFail => new WrongPinException("Wrong PIN."),
-        TpmRc.BadAuth => new WrongPinException("Wrong PIN."),
-        TpmRc.Lockout => new TpmLockedException(
-            "The TPM is locked due to too many incorrect PIN attempts. Wait for it to recover or reboot."),
-        _ => new SealerException($"TPM rejected the operation (rc={rc})."),
-    };
+        LockoutStatus? status = TryReadLockoutStatus(tpm);
+
+        // A failed attempt can be the one that trips lockout: the chip may answer AuthFail yet now be
+        // locked. Treat "locked" as authoritative over the raw rc so the user gets the lockout flow.
+        if (rc == TpmRc.Lockout || status is { InLockout: true })
+            return new TpmLockedException(LockoutMessage, recoverySeconds: status?.RecoverySeconds);
+
+        if (rc is TpmRc.AuthFail or TpmRc.BadAuth)
+            return new WrongPinException("Wrong PIN.", remainingAttempts: status?.RemainingAttempts);
+
+        return new SealerException($"TPM rejected the operation (rc={rc}).");
+    }
+
+    // Last-resort mapping for a raw TpmException that slipped past the per-command response-code checks.
+    // A lockout must still reach the UI as a typed lockout — but the connection that could report the
+    // recovery interval is already torn down here, so it goes up without one.
+    private static SealerException WrapTpmException(TpmException ex, string context)
+        => ex.RawResponse == TpmRc.Lockout
+            ? new TpmLockedException(LockoutMessage, recoverySeconds: null, inner: ex)
+            : new SealerException($"{context}: {ex.Message}", ex);
+
+    /// <summary>The TPM's dictionary-attack lockout state, read read-only via GetCapability.</summary>
+    private readonly record struct LockoutStatus(bool InLockout, int EffectiveMaxAuthFail, int LockoutCounter, int LockoutInterval)
+    {
+        /// <summary>Failed attempts left before lockout (clamped at 0).</summary>
+        public int RemainingAttempts => Math.Max(0, EffectiveMaxAuthFail - LockoutCounter);
+
+        /// <summary>Seconds the chip needs to recover one attempt, or null when it reports no interval.</summary>
+        public int? RecoverySeconds => LockoutInterval > 0 ? LockoutInterval : null;
+    }
+
+    // Reads the chip's DA parameters. Best-effort: returns null (rather than throwing) if the TPM does
+    // not answer, so callers degrade to a generic message instead of failing the unlock outright.
+    private static LockoutStatus? TryReadLockoutStatus(Tpm2 tpm)
+    {
+        try
+        {
+            return new LockoutStatus(
+                InLockout: (ReadProperty(tpm, Pt.Permanent) & (uint)PermanentAttr.InLockout) != 0,
+                EffectiveMaxAuthFail: ComputeEffectiveMaxAuthFail((int)ReadProperty(tpm, Pt.MaxAuthFail), StandardUserLockoutThreshold()),
+                LockoutCounter: (int)ReadProperty(tpm, Pt.LockoutCounter),
+                LockoutInterval: (int)ReadProperty(tpm, Pt.LockoutInterval));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // Microsoft's documented default "Standard User Individual Lockout Threshold" (the GP setting that,
+    // when unset, governs how many TPM auth failures a non-elevated process gets).
+    internal const int WindowsStandardUserLockoutDefault = 4;
+
+    // The number of wrong PINs that actually locks SimpleOtp. The TPM's own MaxAuthFail is the limit on
+    // Linux, but on Windows the OS (TBS) enforces a much smaller "standard user" lockout on top, and a
+    // non-elevated app hits THAT first — so the effective ceiling is the smaller of the two. Reading the
+    // hardware MaxAuthFail alone over-reports (e.g. 31 when the chip really locks at 4).
+    internal static int ComputeEffectiveMaxAuthFail(int hardwareMaxAuthFail, int? standardUserThreshold)
+        => standardUserThreshold is int t && t > 0 ? Math.Min(hardwareMaxAuthFail, t) : hardwareMaxAuthFail;
+
+    // The standard-user threshold in effect, or null where there is no such layer (non-Windows). Uses the
+    // group-policy override when an admin set one, else Microsoft's documented default.
+    private static int? StandardUserLockoutThreshold()
+        => OperatingSystem.IsWindows()
+            ? (ReadWindowsStandardUserThresholdOverride() ?? WindowsStandardUserLockoutDefault)
+            : null;
+
+    [SupportedOSPlatform("windows")]
+    private static int? ReadWindowsStandardUserThresholdOverride()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Policies\Microsoft\TPM");
+            if (key is null) return null;
+            // Match the "Standard User ... Individual ... Threshold" GP value without hard-coding its exact
+            // spelling (it varies); any positive individual-threshold value overrides the default.
+            foreach (string name in key.GetValueNames())
+                if (name.Contains("Individual", StringComparison.OrdinalIgnoreCase)
+                    && name.Contains("Threshold", StringComparison.OrdinalIgnoreCase)
+                    && key.GetValue(name) is int v && v > 0)
+                    return v;
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static uint ReadProperty(Tpm2 tpm, Pt property)
+    {
+        tpm.GetCapability(Cap.TpmProperties, (uint)property, 1, out ICapabilitiesUnion caps);
+        foreach (TaggedProperty p in ((TaggedTpmPropertyArray)caps).tpmProperty)
+            if (p.property == property)
+                return p.value;
+        return 0;
+    }
 
     // --- TPM templates -------------------------------------------------------
 
@@ -319,13 +425,24 @@ public sealed class TpmSecretSealer : ISecretSealer
         new KeyedhashParms(new SchemeHmac(hashAlg)),
         new Tpm2bDigestKeyedhash());
 
-    private static TpmHandle CreateSrk(Tpm2 tpm) => tpm.CreatePrimary(
-        TpmRh.Owner,
-        new SensitiveCreate(Array.Empty<byte>(), Array.Empty<byte>()),
-        SrkTemplate(),
-        SrkOutsideInfo,
-        Array.Empty<PcrSelection>(),
-        out _, out _, out _, out _);
+    private static TpmHandle CreateSrk(Tpm2 tpm)
+    {
+        // Allow errors so a lockout (or any failure) surfaces as a response code we can map while the
+        // TPM connection is still open — rather than a raw TpmException that escapes as an opaque
+        // "Error {Lockout} ... command CreatePrimary" message. In dictionary-attack lockout some chips
+        // refuse CreatePrimary on the owner hierarchy even though it carries no DA-protected auth.
+        TpmHandle srk = tpm._AllowErrors().CreatePrimary(
+            TpmRh.Owner,
+            new SensitiveCreate(Array.Empty<byte>(), Array.Empty<byte>()),
+            SrkTemplate(),
+            SrkOutsideInfo,
+            Array.Empty<PcrSelection>(),
+            out _, out _, out _, out _);
+        TpmRc rc = tpm._GetLastResponseCode();
+        if (rc != TpmRc.Success || srk is null)
+            throw MapAuthFailure(tpm, rc);
+        return srk;
+    }
 
     // --- Device connection ---------------------------------------------------
 
