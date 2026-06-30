@@ -148,7 +148,7 @@ public partial class MainWindowViewModel : ViewModelBase
         UpdateAvailable = true;
     }
 
-    public VaultService? Service { get; private set; }
+    public VaultService? Service { get; internal set; }
 
     /// <summary>Detects the TPM and opens/creates the vault. Call once after the window is shown.</summary>
     public async Task BootstrapAsync()
@@ -233,6 +233,10 @@ public partial class MainWindowViewModel : ViewModelBase
     private void Unlock()
     {
         if (Service is null || IsLockedOut) return;
+        // Starting a fresh attempt clears any leftover lockout text (e.g. the "Lockout cleared…" line a
+        // countdown leaves behind, or an unknown-duration lockout notice), so it can't linger beside the
+        // next wrong-PIN / error message. The lockout path below re-sets it via BeginLockout.
+        LockoutMessage = "";
         try
         {
             Service.Unlock(UnlockPin);
