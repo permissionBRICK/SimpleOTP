@@ -103,22 +103,24 @@ public class TpmLockoutTests
         => Assert.Equal(expected, TpmSecretSealer.ComputeEffectiveMaxAuthFail(hardwareMax, standardUser));
 
     [Theory]
-    [InlineData(600, 4, 2400)] // 10 min interval * 4 tries ~= 40 min estimated total to clear
-    [InlineData(600, 0, null)] // no failed tries -> no estimate
-    [InlineData(0, 4, null)]   // chip reports no interval -> no estimate
-    public void OsLockoutWaitEstimateSeconds_IsIntervalTimesTries(int interval, int counter, int? expected)
-        => Assert.Equal(expected, TpmSecretSealer.OsLockoutWaitEstimateSeconds(interval, counter));
-
-    [Theory]
-    [InlineData(2400, "approximately 40 minutes")] // the user's case: 10 min * 4
-    [InlineData(60, "approximately 1 minute")]     // singular
-    [InlineData(5400, "approximately 1 hour 30 minutes")]
-    public void FormatLockoutSuggestion_StatesAnApproximateWait(int seconds, string expected)
-        => Assert.Contains(expected, MainWindowViewModel.FormatLockoutSuggestion(seconds));
+    [InlineData(true, 1000, 1000)] // genuine hardware DA lockout heals after lockoutInterval -> countdown
+    [InlineData(false, 600, null)] // Lockout while inLockout=false is the OS lockout -> no countdown (show guidance)
+    [InlineData(true, 0, null)]    // hardware lockout but the chip reports no interval -> unknown, no countdown
+    [InlineData(false, 0, null)]
+    public void LockoutRecoverySeconds_OnlyCountsDownForHardwareLockout(bool inLockout, int interval, int? expected)
+        => Assert.Equal(expected, TpmSecretSealer.LockoutRecoverySeconds(inLockout, interval));
 
     [Fact]
-    public void FormatLockoutSuggestion_WithoutEstimate_GivesGenericGuidance()
-        => Assert.Contains("Wait a few minutes", MainWindowViewModel.FormatLockoutSuggestion(null));
+    public void FormatOsLockoutMessage_OnWindows_PointsToRebootOrAdmin()
+    {
+        string msg = MainWindowViewModel.FormatOsLockoutMessage(isWindows: true);
+        Assert.Contains("Reboot", msg);
+        Assert.Contains("run as administrator", msg);
+    }
+
+    [Fact]
+    public void FormatOsLockoutMessage_OffWindows_GivesGenericGuidance()
+        => Assert.Contains("reboot", MainWindowViewModel.FormatOsLockoutMessage(isWindows: false));
 
     // After a lockout countdown elapses it leaves a "Lockout cleared…" line; a later wrong PIN must
     // replace it, not show both messages stacked. Drives the real Unlock() command through a locked,
