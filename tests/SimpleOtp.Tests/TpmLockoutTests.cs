@@ -1,5 +1,7 @@
 using SimpleOtp.App.ViewModels;
+using SimpleOtp.Core;
 using SimpleOtp.Core.Crypto;
+using SimpleOtp.Tpm;
 
 namespace SimpleOtp.Tests;
 
@@ -91,4 +93,43 @@ public class TpmLockoutTests
     [InlineData(3725, "Try again in 1h 02m 05s.")]
     public void FormatLockoutCountdown_FormatsTime(int seconds, string expectedTail)
         => Assert.EndsWith(expectedTail, MainWindowViewModel.FormatLockoutCountdown(seconds));
+
+    [Theory]
+    [InlineData(31, 4, 4)]    // Windows: OS standard-user limit (4) bites long before the hardware 31
+    [InlineData(3, 4, 3)]     // hardware limit smaller than the OS cap -> hardware wins
+    [InlineData(31, null, 31)]// no standard-user layer (e.g. Linux) -> hardware MaxAuthFail is the real limit
+    [InlineData(31, 0, 31)]   // a zero/invalid threshold is ignored, never reports 0 remaining
+    public void ComputeEffectiveMaxAuthFail_TakesTheSmallerRealLimit(int hardwareMax, int? standardUser, int expected)
+        => Assert.Equal(expected, TpmSecretSealer.ComputeEffectiveMaxAuthFail(hardwareMax, standardUser));
+
+    // After a lockout countdown elapses it leaves a "Lockout cleared…" line; a later wrong PIN must
+    // replace it, not show both messages stacked. Drives the real Unlock() command through a locked,
+    // PIN-protected vault so the wrong PIN raises WrongPinException exactly as in production.
+    [Fact]
+    public void Unlock_WrongPinAfterLockoutCleared_DropsTheStaleLockoutMessage()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "simpleotp-vm-" + Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var sealer = new FakeSealer();
+            var service = new VaultService(sealer, Path.Combine(dir, "vault.json"));
+            service.CreateNew("1234"u8);
+            service.Lock();
+
+            var vm = new MainWindowViewModel(sealer) { Service = service };
+            vm.LockoutMessage = "Lockout cleared — enter your PIN to try again."; // left over from a prior lockout
+            vm.UnlockPin = "9999";                                                // wrong
+
+            vm.UnlockCommand.Execute(null);
+
+            Assert.False(vm.IsLockedOut);
+            Assert.Equal("", vm.LockoutMessage);            // stale lockout line gone
+            Assert.Contains("Wrong PIN", vm.UnlockError);   // only the wrong-PIN feedback remains
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* ignore */ }
+        }
+    }
 }

@@ -64,6 +64,67 @@ public class TpmIntegrationTests
     }
 
     [SkippableFact]
+    public void Lockout_SurfacesTypedException_NotRawCreatePrimaryError_OnRealTpm()
+    {
+        Skip.IfNot(DaEnabled, DaSkipReason); // deliberately trips lockout
+        var sealer = new TpmSecretSealer();
+        Skip.IfNot(sealer.IsAvailable, "No usable TPM present.");
+
+        // Regression for the locked-TPM unlock crash: once the chip is in dictionary-attack lockout, an
+        // unlock attempt must raise a typed TpmLockedException — never leak the raw
+        // "Error {Lockout} ... command CreatePrimary" that previously reached (and crashed) the UI.
+        // The chip is left exactly as found: we reset the DA counter in the finally.
+        SealedBlob blob = sealer.Seal("payload"u8, "1234"u8);
+        try
+        {
+            bool sawTypedLockout = false;
+            // Hammer the wrong PIN well past MaxAuthFail so later attempts run fully locked (the
+            // CreatePrimary path). Some attempts report WrongPin (with attempts-left); once locked they
+            // must all be TpmLockedException with a clean message and no raw-error leak.
+            for (int i = 0; i < 12 && !sawTypedLockout; i++)
+            {
+                try { sealer.Unseal(blob, "9999"u8); }
+                catch (WrongPinException) { /* attempts remain */ }
+                catch (TpmLockedException ex)
+                {
+                    sawTypedLockout = true;
+                    Assert.DoesNotContain("CreatePrimary", ex.Message);
+                    Assert.DoesNotContain("unseal failed", ex.Message);
+                }
+            }
+            Assert.True(sawTypedLockout, "Expected the chip to reach a typed TpmLockedException.");
+
+            // A further attempt while fully locked must also be typed (not a base SealerException).
+            Assert.Throws<TpmLockedException>(() => sealer.Unseal(blob, "9999"u8));
+        }
+        finally
+        {
+            ResetDictionaryAttackLock();
+        }
+
+        // The reset restored the chip, so the correct PIN unseals again.
+        Assert.Equal("payload"u8.ToArray(), sealer.Unseal(blob, "1234"u8));
+    }
+
+    // Resets the TPM dictionary-attack lockout (requires empty lockout-hierarchy auth, the default on a
+    // never-provisioned chip). Best-effort: a chip with a lockout password simply stays locked until it
+    // recovers on its own. Test-only — production never resets the chip's anti-hammering.
+    private static void ResetDictionaryAttackLock()
+    {
+        try
+        {
+            string path = File.Exists("/dev/tpmrm0") ? "/dev/tpmrm0" : "/dev/tpm0";
+            using Tpm2Lib.Tpm2Device dev = OperatingSystem.IsWindows()
+                ? new Tpm2Lib.TbsDevice()
+                : new Tpm2Lib.LinuxTpmDevice(path);
+            dev.Connect();
+            using var tpm = new Tpm2Lib.Tpm2(dev);
+            tpm.DictionaryAttackLockReset(Tpm2Lib.TpmRh.Lockout);
+        }
+        catch { /* lockout auth is set on this chip; leave it to recover naturally */ }
+    }
+
+    [SkippableFact]
     public void LongAuthValue_RoundTrips_OnRealTpm()
     {
         Skip.IfNot(Enabled, SkipReason);
