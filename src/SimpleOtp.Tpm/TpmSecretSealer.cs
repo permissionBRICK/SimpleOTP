@@ -303,15 +303,12 @@ public sealed class TpmSecretSealer : ISecretSealer
         // locked. Treat "locked" as authoritative over the raw rc so the user gets the lockout flow.
         if (rc == TpmRc.Lockout || status is { InLockout: true })
         {
-            // recoverySeconds = one heal interval: the minimum, knowable wait the UI holds for. When the
-            // chip reports a Lockout while inLockout is FALSE, it's the OS-managed "standard user" lockout
-            // (Windows TBS) whose true duration isn't in any TPM property — so additionally suggest
-            // interval * counter as a rough total (e.g. 10 min * 4 ~= 40 min).
-            int? recovery = status?.RecoverySeconds;
-            int? suggested = status is { InLockout: false } os
-                ? OsLockoutWaitEstimateSeconds(os.LockoutInterval, os.LockoutCounter)
-                : null;
-            return new TpmLockedException(LockoutMessage, recoverySeconds: recovery, suggestedWaitSeconds: suggested);
+            // Only the TPM's own DA lockout (inLockout) heals after a knowable interval -> a real
+            // countdown. A Lockout response while inLockout is FALSE is the OS-managed "standard user"
+            // lockout (Windows TBS): its wait isn't reported (and each attempt can restart it), but a
+            // reboot or an elevated run clears it — so report no interval and let the UI show that.
+            int? recovery = status is { } s ? LockoutRecoverySeconds(s.InLockout, s.LockoutInterval) : null;
+            return new TpmLockedException(LockoutMessage, recoverySeconds: recovery);
         }
 
         if (rc is TpmRc.AuthFail or TpmRc.BadAuth)
@@ -320,12 +317,10 @@ public sealed class TpmSecretSealer : ISecretSealer
         return new SealerException($"TPM rejected the operation (rc={rc}).");
     }
 
-    // Rough wait estimate for the OS-managed (Windows standard-user) lockout, which the TPM does not
-    // report: the attempt counter heals one step per lockoutInterval, so interval * counter approximates
-    // the time to fully clear (e.g. 10 min * 4 ~= 40 min). A suggestion only — the real duration is
-    // OS-side and each attempt can restart it.
-    internal static int? OsLockoutWaitEstimateSeconds(int lockoutIntervalSeconds, int lockoutCounter)
-        => lockoutIntervalSeconds > 0 && lockoutCounter > 0 ? lockoutIntervalSeconds * lockoutCounter : null;
+    // A real countdown only applies to the TPM's own DA lockout (inLockout), which heals after the
+    // lockout interval. An OS-managed lockout (Lockout response with inLockout false) gets no interval.
+    internal static int? LockoutRecoverySeconds(bool inLockout, int lockoutIntervalSeconds)
+        => inLockout && lockoutIntervalSeconds > 0 ? lockoutIntervalSeconds : null;
 
     // Last-resort mapping for a raw TpmException that slipped past the per-command response-code checks.
     // A lockout must still reach the UI as a typed lockout — but the connection that could report the
