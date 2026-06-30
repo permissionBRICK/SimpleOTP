@@ -15,11 +15,23 @@ public sealed class FakeSealer : ISecretSealer
 {
     private readonly byte[] _deviceKey;
 
-    public FakeSealer(byte[]? deviceKey = null)
-        => _deviceKey = deviceKey ?? RandomNumberGenerator.GetBytes(32);
+    // Optional dictionary-attack simulation. Off by default (_maxAuthFail == 0) so existing tests keep
+    // their plain wrong-PIN behaviour; opt in to model the TPM's attempt counter / lockout.
+    private readonly int _maxAuthFail;
+    private readonly int _recoverySeconds;
+    private int _failedTries;
+
+    public FakeSealer(byte[]? deviceKey = null, int maxAuthFail = 0, int recoverySeconds = 0)
+    {
+        _deviceKey = deviceKey ?? RandomNumberGenerator.GetBytes(32);
+        _maxAuthFail = maxAuthFail;
+        _recoverySeconds = recoverySeconds;
+    }
 
     /// <summary>A clone bound to the same "device" (same device key) — used to test reopen-after-restart.</summary>
     public FakeSealer CloneSameDevice() => new(_deviceKey);
+
+    private bool DaEnabled => _maxAuthFail > 0;
 
     public bool IsAvailable => true;
     public string BackendId => "fake";
@@ -40,6 +52,10 @@ public sealed class FakeSealer : ISecretSealer
 
     public byte[] Unseal(SealedBlob blob, ReadOnlySpan<byte> auth)
     {
+        // Mirror the real backend: once locked, refuse before touching the blob.
+        if (DaEnabled && _failedTries >= _maxAuthFail)
+            throw new TpmLockedException("TPM is locked (fake).", recoverySeconds: _recoverySeconds);
+
         byte[] nonce = blob.Public;
         byte[] tag = blob.Private[..16];
         byte[] ct = blob.Private[16..];
@@ -57,8 +73,22 @@ public sealed class FakeSealer : ISecretSealer
         byte[] authHash = payload[..32];
         byte[] data = payload[32..];
         if (!CryptographicOperations.FixedTimeEquals(authHash, SHA256.HashData(auth)))
-            throw new WrongPinException("Wrong PIN (fake).");
+            throw WrongAuth();
+
+        if (DaEnabled) _failedTries = 0; // a correct auth resets the attempt counter
         return data;
+    }
+
+    // Models the TPM's dictionary-attack counter: each wrong auth advances it; the attempt that reaches
+    // the limit (and any after) reports lockout rather than a wrong-PIN error.
+    private SealerException WrongAuth()
+    {
+        if (!DaEnabled)
+            return new WrongPinException("Wrong PIN (fake).");
+        _failedTries++;
+        return _failedTries >= _maxAuthFail
+            ? new TpmLockedException("TPM is locked (fake).", recoverySeconds: _recoverySeconds)
+            : new WrongPinException("Wrong PIN (fake).", remainingAttempts: _maxAuthFail - _failedTries);
     }
 
     // Models the TPM HMAC key as a device-bound blob holding the key bytes (never returned to the

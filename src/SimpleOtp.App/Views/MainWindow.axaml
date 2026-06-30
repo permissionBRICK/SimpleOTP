@@ -266,11 +266,16 @@
                     <TextBlock Text="Enter your PIN" FontSize="18" FontWeight="SemiBold"
                                Foreground="#E7E9EC" HorizontalAlignment="Center"/>
                     <TextBox x:Name="PinBox" PlaceholderText="PIN" PasswordChar="•" Text="{Binding UnlockPin}"
+                             IsEnabled="{Binding !IsLockedOut}"
                              HorizontalAlignment="Stretch" KeyDown="OnPinKeyDown"/>
                     <TextBlock Text="{Binding UnlockError}" Foreground="#F2685C"
                                IsVisible="{Binding UnlockError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                               TextWrapping="Wrap" HorizontalAlignment="Center"/>
+                               TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
+                    <TextBlock Text="{Binding LockoutMessage}" Foreground="#E8B339"
+                               IsVisible="{Binding LockoutMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
                     <Button Classes="primary" Content="Unlock" Command="{Binding UnlockCommand}"
+                            IsEnabled="{Binding !IsLockedOut}"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
                     <Button Content="Retry auto-unlock" Command="{Binding RetryAutoUnlockCommand}"
                             IsVisible="{Binding AutoUnlockAvailable}" HorizontalAlignment="Center"/>

@@ -15,7 +15,14 @@ public sealed class SealerUnavailableException : SealerException
 /// <summary>The supplied PIN/auth value was rejected by the TPM.</summary>
 public sealed class WrongPinException : SealerException
 {
-    public WrongPinException(string message, Exception? inner = null) : base(message, inner) { }
+    /// <summary>
+    /// Attempts remaining before the TPM trips into dictionary-attack lockout, when the backend can
+    /// report it (TPM <c>maxAuthFail - lockoutCounter</c>); null if unknown.
+    /// </summary>
+    public int? RemainingAttempts { get; }
+
+    public WrongPinException(string message, int? remainingAttempts = null, Exception? inner = null)
+        : base(message, inner) => RemainingAttempts = remainingAttempts;
 }
 
 /// <summary>
@@ -30,7 +37,14 @@ public sealed class WrongDeviceException : SealerException
 /// <summary>The TPM is in dictionary-attack lockout; too many bad auth attempts.</summary>
 public sealed class TpmLockedException : SealerException
 {
-    public TpmLockedException(string message, Exception? inner = null) : base(message, inner) { }
+    /// <summary>
+    /// Seconds the TPM needs before it will accept another attempt (the chip's lockout recovery
+    /// interval), when the backend can report it; null if unknown.
+    /// </summary>
+    public int? RecoverySeconds { get; }
+
+    public TpmLockedException(string message, int? recoverySeconds = null, Exception? inner = null)
+        : base(message, inner) => RecoverySeconds = recoverySeconds;
 }
 
 /// <summary>
