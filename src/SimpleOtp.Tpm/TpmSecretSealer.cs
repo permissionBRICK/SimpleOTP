@@ -302,13 +302,30 @@ public sealed class TpmSecretSealer : ISecretSealer
         // A failed attempt can be the one that trips lockout: the chip may answer AuthFail yet now be
         // locked. Treat "locked" as authoritative over the raw rc so the user gets the lockout flow.
         if (rc == TpmRc.Lockout || status is { InLockout: true })
-            return new TpmLockedException(LockoutMessage, recoverySeconds: status?.RecoverySeconds);
+        {
+            // recoverySeconds = one heal interval: the minimum, knowable wait the UI holds for. When the
+            // chip reports a Lockout while inLockout is FALSE, it's the OS-managed "standard user" lockout
+            // (Windows TBS) whose true duration isn't in any TPM property — so additionally suggest
+            // interval * counter as a rough total (e.g. 10 min * 4 ~= 40 min).
+            int? recovery = status?.RecoverySeconds;
+            int? suggested = status is { InLockout: false } os
+                ? OsLockoutWaitEstimateSeconds(os.LockoutInterval, os.LockoutCounter)
+                : null;
+            return new TpmLockedException(LockoutMessage, recoverySeconds: recovery, suggestedWaitSeconds: suggested);
+        }
 
         if (rc is TpmRc.AuthFail or TpmRc.BadAuth)
             return new WrongPinException("Wrong PIN.", remainingAttempts: status?.RemainingAttempts);
 
         return new SealerException($"TPM rejected the operation (rc={rc}).");
     }
+
+    // Rough wait estimate for the OS-managed (Windows standard-user) lockout, which the TPM does not
+    // report: the attempt counter heals one step per lockoutInterval, so interval * counter approximates
+    // the time to fully clear (e.g. 10 min * 4 ~= 40 min). A suggestion only — the real duration is
+    // OS-side and each attempt can restart it.
+    internal static int? OsLockoutWaitEstimateSeconds(int lockoutIntervalSeconds, int lockoutCounter)
+        => lockoutIntervalSeconds > 0 && lockoutCounter > 0 ? lockoutIntervalSeconds * lockoutCounter : null;
 
     // Last-resort mapping for a raw TpmException that slipped past the per-command response-code checks.
     // A lockout must still reach the UI as a typed lockout — but the connection that could report the

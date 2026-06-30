@@ -108,6 +108,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _lockoutMessage = "";
     private readonly DispatcherTimer _lockoutTimer;
     private int _lockoutRemaining;
+    private int? _lockoutSuggestion; // OS-managed lockout: rough total wait, shown as a static estimate
 
     // Toast overlay.
     [ObservableProperty] private bool _isToastVisible;
@@ -250,7 +251,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (TpmLockedException ex)
         {
-            BeginLockout(ex.RecoverySeconds);
+            BeginLockout(ex.RecoverySeconds, ex.SuggestedWaitSeconds);
         }
         catch (WrongDeviceException ex)
         {
@@ -270,7 +271,7 @@ public partial class MainWindowViewModel : ViewModelBase
             ? $"Wrong PIN. {n} {(n == 1 ? "attempt" : "attempts")} left before the TPM locks."
             : "Wrong PIN. Try again.";
 
-    /// <summary>Human-friendly "try again in …" line for the lockout countdown.</summary>
+    /// <summary>Live "try again in …" line for a genuine hardware lockout countdown.</summary>
     internal static string FormatLockoutCountdown(int secondsRemaining)
     {
         var ts = TimeSpan.FromSeconds(Math.Max(0, secondsRemaining));
@@ -281,26 +282,53 @@ public partial class MainWindowViewModel : ViewModelBase
         return $"Too many wrong PINs — the TPM is locked. Try again in {time}.";
     }
 
-    // Enter the locked-out state. With a known recovery interval, disable input and count it down;
-    // otherwise just show the reason and leave input enabled (a still-locked retry re-enters this path).
-    private void BeginLockout(int? recoverySeconds)
+    /// <summary>
+    /// Static "wait approximately …" suggestion for an OS-managed lockout (Windows' standard-user TPM
+    /// lockout), whose true duration isn't reported — we estimate it but don't tick it down.
+    /// </summary>
+    internal static string FormatLockoutSuggestion(int? suggestedWaitSeconds)
+        => suggestedWaitSeconds is int s && s > 0
+            ? $"Too many wrong PINs — TPM access is temporarily locked. Wait approximately {ApproxDuration(s)} " +
+              "before trying again; each attempt can restart the wait."
+            : "Too many wrong PINs — TPM access is temporarily locked. Wait a few minutes before trying again, " +
+              "and avoid repeated attempts: each one can restart the wait.";
+
+    private static string ApproxDuration(int seconds)
+    {
+        int minutes = (int)Math.Ceiling(seconds / 60.0);
+        if (minutes < 60) return $"{minutes} minute{(minutes == 1 ? "" : "s")}";
+        int h = minutes / 60, m = minutes % 60;
+        return m == 0 ? $"{h} hour{(h == 1 ? "" : "s")}" : $"{h} hour{(h == 1 ? "" : "s")} {m} minutes";
+    }
+
+    // Enter the locked-out state. We disable input only for the known minimum interval (recoverySeconds),
+    // then re-enable — even an OS-managed lockout whose real wait is longer is only *held* for that
+    // minimum, with the longer estimate shown as a suggestion so the user isn't blocked indefinitely.
+    private void BeginLockout(int? recoverySeconds, int? suggestedWaitSeconds)
     {
         UnlockPin = "";
         UnlockError = "";
+        _lockoutSuggestion = suggestedWaitSeconds;
         if (recoverySeconds is int s && s > 0)
         {
             _lockoutRemaining = s;
             IsLockedOut = true;
-            LockoutMessage = FormatLockoutCountdown(_lockoutRemaining);
+            LockoutMessage = LockoutText();
             _lockoutTimer.Start();
         }
         else
         {
+            // No interval to hold on — just show the suggestion/guidance; input stays enabled.
             ResetLockout();
-            LockoutMessage =
-                "The TPM is locked from too many wrong PINs. Wait for it to recover, or reboot, then try again.";
+            LockoutMessage = FormatLockoutSuggestion(suggestedWaitSeconds);
         }
     }
+
+    // An OS-managed lockout shows the static estimate while it's held; a hardware lockout ticks down.
+    private string LockoutText()
+        => _lockoutSuggestion is int est && est > 0
+            ? FormatLockoutSuggestion(est)
+            : FormatLockoutCountdown(_lockoutRemaining);
 
     private void LockoutTick()
     {
@@ -308,16 +336,20 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _lockoutTimer.Stop();
             IsLockedOut = false;
-            LockoutMessage = "Lockout cleared — enter your PIN to try again.";
+            // Hardware lockout: the wait is over. OS-managed: keep the estimate visible (it may take
+            // longer than the minimum hold), but re-enable input so the user may try again if they wish.
+            if (_lockoutSuggestion is null)
+                LockoutMessage = "Lockout cleared — enter your PIN to try again.";
             return;
         }
-        LockoutMessage = FormatLockoutCountdown(_lockoutRemaining);
+        LockoutMessage = LockoutText();
     }
 
     private void ResetLockout()
     {
         _lockoutTimer.Stop();
         _lockoutRemaining = 0;
+        _lockoutSuggestion = null;
         IsLockedOut = false;
         LockoutMessage = "";
     }
