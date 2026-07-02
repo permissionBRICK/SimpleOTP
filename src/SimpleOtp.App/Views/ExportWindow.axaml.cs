@@ -12,10 +12,14 @@ public partial class ExportWindow : Window
 
     public ExportWindow() : this([], 0) { }
 
-    public ExportWindow(IReadOnlyList<string> migrationUris, int accountCount)
+    public ExportWindow(IReadOnlyList<string> uris, int accountCount,
+        string heading = "Export accounts",
+        string description = "Scan this with Google Authenticator (Add → Scan a QR code) or another authenticator to transfer your accounts. The migration format always uses a 30-second period and 6/8-digit codes.",
+        string saveBaseName = "simpleotp-export")
     {
         InitializeComponent();
-        _vm = new ExportViewModel(migrationUris, accountCount);
+        Title = heading;
+        _vm = new ExportViewModel(uris, accountCount, heading, description, saveBaseName);
         DataContext = _vm;
     }
 
@@ -38,7 +42,7 @@ public partial class ExportWindow : Window
         int saved = 0;
         for (int i = 0; i < _vm.PngBytes.Count; i++)
         {
-            string name = _vm.PngBytes.Count == 1 ? "simpleotp-export.png" : $"simpleotp-export-{i + 1}.png";
+            string name = _vm.PngBytes.Count == 1 ? $"{_vm.SaveBaseName}.png" : $"{_vm.SaveBaseName}-{i + 1}.png";
             IStorageFile? file = await folder.CreateFileAsync(name);
             if (file is null)
                 continue;

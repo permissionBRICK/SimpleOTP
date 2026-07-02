@@ -35,9 +35,9 @@
         </Grid>
 
         <StackPanel Spacing="12">
-            <TextBlock Text="Export accounts" FontSize="20" FontWeight="Bold" Foreground="#F2F3F5"/>
+            <TextBlock Text="{Binding Heading}" FontSize="20" FontWeight="Bold" Foreground="#F2F3F5"/>
             <TextBlock Foreground="#9AA0AA" FontSize="12" TextWrapping="Wrap"
-                       Text="Scan this with Google Authenticator (Add → Scan a QR code) or another authenticator to transfer your accounts. The migration format always uses a 30-second period and 6/8-digit codes."/>
+                       Text="{Binding Description}"/>
 
             <Border Background="White" CornerRadius="8" Padding="12" HorizontalAlignment="Center">
                 <Image Source="{Binding CurrentImage}" Width="360" Height="360"/>

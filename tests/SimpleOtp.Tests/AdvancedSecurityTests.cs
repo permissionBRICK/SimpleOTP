@@ -72,6 +72,7 @@ public class AdvancedSecurityTests : IDisposable
         using var svc = NewAdvancedVault(new FakeSealer(), masterPassword: null);
         Assert.False(svc.ExportProtected);
         Assert.Throws<InvalidOperationException>(() => svc.ExportToMigrationUris());
+        Assert.Throws<InvalidOperationException>(() => svc.ExportToOtpAuthUri(svc.Accounts[0]));
         Assert.All(svc.Accounts, a => Assert.Null(a.ExportCopy));
     }
 
@@ -89,10 +90,25 @@ public class AdvancedSecurityTests : IDisposable
     }
 
     [Fact]
+    public void Advanced_WithPassword_SingleOtpAuthExportRoundTrips()
+    {
+        const string pw = "a-long-master-password";
+        using var svc = NewAdvancedVault(new FakeSealer(), masterPassword: pw);
+
+        string uri = svc.ExportToOtpAuthUri(svc.Accounts[0], pw);
+
+        OtpAuthData exported = OtpAuthUri.Parse(uri);
+        Assert.Equal("GitHub", exported.Issuer);
+        Assert.Equal("octocat", exported.Label);
+        Assert.Equal(Encoding.ASCII.GetBytes("12345678901234567890"), exported.SecretBytes);
+    }
+
+    [Fact]
     public void Advanced_Export_WrongPassword_Throws()
     {
         using var svc = NewAdvancedVault(new FakeSealer(), masterPassword: "the-right-one");
         Assert.Throws<WrongPinException>(() => svc.ExportToMigrationUris("the-wrong-one"));
+        Assert.Throws<WrongPinException>(() => svc.ExportToOtpAuthUri(svc.Accounts[0], "the-wrong-one"));
     }
 
     [Fact]

@@ -25,15 +25,24 @@ public partial class ExportViewModel : ViewModelBase
     public int Count => _bitmaps.Count;
     public bool HasMultiple => _bitmaps.Count > 1;
     public int AccountCount { get; }
+    public string Heading { get; }
+    public string Description { get; }
+    public string SaveBaseName { get; }
     public IReadOnlyList<byte[]> PngBytes => _pngBytes;
 
     /// <summary>Design-time constructor.</summary>
     public ExportViewModel() : this([], 0) { }
 
-    public ExportViewModel(IReadOnlyList<string> migrationUris, int accountCount)
+    public ExportViewModel(IReadOnlyList<string> uris, int accountCount,
+        string heading = "Export accounts",
+        string description = "Scan this with Google Authenticator (Add → Scan a QR code) or another authenticator to transfer your accounts. The migration format always uses a 30-second period and 6/8-digit codes.",
+        string saveBaseName = "simpleotp-export")
     {
         AccountCount = accountCount;
-        foreach (string uri in migrationUris)
+        Heading = heading;
+        Description = description;
+        SaveBaseName = saveBaseName;
+        foreach (string uri in uris)
         {
             byte[] png = QrEncoder.EncodePng(uri, pixelSize: 520);
             _pngBytes.Add(png);

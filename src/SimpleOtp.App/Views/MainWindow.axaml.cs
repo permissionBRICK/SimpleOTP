@@ -172,6 +172,50 @@ public partial class MainWindow : Window
             Vm.DeleteItem(item);
     }
 
+    private async void OnExportAccountClick(object? sender, RoutedEventArgs e)
+    {
+        if (_menuTarget is not { } item || Vm?.Service is null)
+            return;
+
+        string? masterPassword = null;
+        if (Vm.Service.Mode == SimpleOtp.Core.Model.SecurityMode.Advanced)
+        {
+            if (!Vm.Service.ExportProtected)
+            {
+                await Dialogs.AlertAsync(this, "Export disabled",
+                    "This vault uses Advanced Security without a master password, so this account's seed cannot be " +
+                    "read off this device. Use the original QR code to set it up elsewhere.");
+                return;
+            }
+            masterPassword = await Dialogs.PromptAsync(this, "Export account",
+                "Enter your master password to recover this account's seed for export.", "Export",
+                placeholder: "Master password", isPassword: true);
+            if (masterPassword is null) return; // cancelled
+        }
+
+        string uri;
+        try
+        {
+            uri = Vm.Service.ExportToOtpAuthUri(item.Account, masterPassword);
+        }
+        catch (SimpleOtp.Core.Crypto.WrongPinException)
+        {
+            await Dialogs.AlertAsync(this, "Couldn't export", "Wrong master password.");
+            return;
+        }
+        catch (Exception ex)
+        {
+            await Dialogs.AlertAsync(this, "Couldn't export", ex.Message);
+            return;
+        }
+
+        var dialog = new ExportWindow([uri], 1,
+            heading: $"Export {item.Title}",
+            description: "Scan this QR with an authenticator app to add this one account. It uses the standard otpauth://totp seed format.",
+            saveBaseName: ExportFileBaseName(item.Title));
+        await dialog.ShowDialog(this);
+    }
+
     // --- Folders --------------------------------------------------------------
 
     private async void OnAddFolderClick(object? sender, RoutedEventArgs e)
@@ -301,7 +345,7 @@ public partial class MainWindow : Window
             await Dialogs.AlertAsync(this, "Nothing to export", "Add some accounts first.");
             return;
         }
-        var dialog = new ExportWindow(uris, Vm.Tokens.Count);
+        var dialog = new ExportWindow(uris, Vm.Service.Accounts.Count);
         await dialog.ShowDialog(this);
     }
 
@@ -320,5 +364,14 @@ public partial class MainWindow : Window
         var dialog = new SettingsWindow(Vm.Service, Vm.Update);
         await dialog.ShowDialog<bool>(this);
         Vm.NotifySettingsChanged();
+    }
+
+    private static string ExportFileBaseName(string title)
+    {
+        string safe = new string(title.Trim().ToLowerInvariant().Select(c =>
+            char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
+        while (safe.Contains("--", StringComparison.Ordinal))
+            safe = safe.Replace("--", "-", StringComparison.Ordinal);
+        return string.IsNullOrWhiteSpace(safe) ? "simpleotp-account-export" : $"simpleotp-{safe}-export";
     }
 }
