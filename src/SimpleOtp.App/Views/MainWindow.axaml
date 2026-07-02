@@ -224,6 +224,7 @@
                                                             <MenuItem Header="Move down" Tag="down" Click="OnMoveDownClick"/>
                                                             <Separator/>
                                                             <MenuItem Header="Move to folder…" Click="OnMoveClick"/>
+                                                            <MenuItem Header="Export QR…" Click="OnExportAccountClick"/>
                                                             <MenuItem Header="Remove" Click="OnDeleteClick"/>
                                                         </MenuFlyout>
                                                     </FlyoutBase.AttachedFlyout>

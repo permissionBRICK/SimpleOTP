@@ -353,6 +353,65 @@ public sealed class VaultService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Exports one account as a standard <c>otpauth://totp/...</c> URI: the original authenticator QR
+    /// format used when adding a single 2FA seed. Each recovered secret is zeroed after the URI is built.
+    ///
+    /// Simple mode decrypts under the DEK (requires the vault unlocked; <paramref name="masterPassword"/>
+    /// is ignored). Advanced mode requires the master password to recover that account's export copy.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Advanced mode without a master password (export disabled).</exception>
+    /// <exception cref="WrongPinException">Advanced mode with a wrong master password.</exception>
+    public string ExportToOtpAuthUri(Account account, string? masterPassword = null)
+    {
+        Account stored = _file.Accounts.FirstOrDefault(a => a.Id == account.Id)
+            ?? throw new InvalidOperationException("Account no longer exists.");
+
+        if (_file.Mode == SecurityMode.Simple)
+        {
+            EnsureUnlocked();
+            byte[] secret = _vault!.Decrypt(stored.Secret!);
+            try
+            {
+                return BuildOtpAuthUri(stored, secret);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(secret);
+            }
+        }
+
+        // Advanced mode.
+        if (!_file.ExportProtected)
+            throw new InvalidOperationException(
+                "Exporting is disabled: this vault uses Advanced Security without a master password, " +
+                "so the secret cannot be recovered from the device.");
+        ValidateDevice();
+
+        if (stored.ExportCopy is null)
+            throw new SealerException($"Account '{stored.DisplayName}' has no recoverable export copy.");
+
+        byte[] pwBytes = PinBytes(masterPassword);
+        byte[]? priv = null;
+        byte[]? recovered = null;
+        try
+        {
+            priv = _sealer.Unseal(_file.ExportKeySealed!, pwBytes); // WrongPinException on bad password
+            recovered = ExportProtection.Decrypt(priv, _file.ExportPublicKey!, stored.ExportCopy);
+            return BuildOtpAuthUri(stored, recovered);
+        }
+        finally
+        {
+            if (recovered is not null) CryptographicOperations.ZeroMemory(recovered);
+            if (priv is not null) CryptographicOperations.ZeroMemory(priv);
+            CryptographicOperations.ZeroMemory(pwBytes);
+        }
+    }
+
+    private static string BuildOtpAuthUri(Account account, byte[] secret)
+        => OtpAuthUri.Build(account.Issuer, account.Label, OtpAuthUri.EncodeBase32(secret),
+            account.Algorithm, account.Digits, account.Period);
+
     // --- Security-mode conversion --------------------------------------------
 
     /// <summary>

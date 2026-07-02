@@ -145,4 +145,20 @@ public class VaultServiceTests : IDisposable
             System.Text.Encoding.ASCII.GetBytes("12345678901234567890"),
             exported.First(a => a.Label == "octocat").SecretBytes);
     }
+
+    [Fact]
+    public void ExportToOtpAuthUri_RoundTripsSingleAccount()
+    {
+        using var svc = new VaultService(new FakeSealer(), _path);
+        svc.CreateNew(ReadOnlySpan<byte>.Empty);
+        var account = svc.AddAccount(OtpAuthUri.Parse(SampleUri));
+        svc.AddAccount(OtpAuthUri.Parse(SampleUri.Replace("octocat", "hubber")));
+
+        string uri = svc.ExportToOtpAuthUri(account);
+
+        OtpAuthData exported = OtpAuthUri.Parse(uri);
+        Assert.Equal("GitHub", exported.Issuer);
+        Assert.Equal("octocat", exported.Label);
+        Assert.Equal(System.Text.Encoding.ASCII.GetBytes("12345678901234567890"), exported.SecretBytes);
+    }
 }
